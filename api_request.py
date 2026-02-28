@@ -1,6 +1,11 @@
 from google import genai
-import time
+from functools import lru_cache
 
+
+@lru_cache(maxsize=1)
+def get_gemini_client(api_key):
+    """缓存 Gemini Client，避免每次翻译都重新实例化"""
+    return genai.Client(api_key=api_key)
 
 def validate_api_key(api_key):
     """
@@ -11,40 +16,28 @@ def validate_api_key(api_key):
         return False, "API Key cannot be empty"
 
     try:
-        # 实例化客户端
-        client = genai.Client(api_key=api_key)
-
-        # 发送一个极简的测试请求
+        client = get_gemini_client(api_key)
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents="Hello"
         )
-
         if response and response.text:
             return True, "API Key is valid"
         else:
             return False, "API Key is invalid"
-
     except Exception as e:
         return False, f"Verify Error: {str(e)}"
-
 
 def translate_with_gemini(text, api_key, source_lang="Russian",
                           target_lang="Simplified Chinese (for Game Localization)"):
     """
-    调用 Google Genai (新版 SDK) 进行翻译
-    :param text: 待翻译文本
-    :param api_key: 用户的 API Key (动态传入)
-    :param source_lang: 源语言
-    :param target_lang: 目标语言
-    :return: 翻译后的文本字符串
+    调用 Google Genai 进行翻译
     """
     if not text or not text.strip():
         return ""
 
     try:
-        # 使用传入的 api_key 实例化
-        client = genai.Client(api_key=api_key)
+        client = get_gemini_client(api_key)
     except Exception as e:
         return f"[Client Init Error] {str(e)}"
 
@@ -64,11 +57,9 @@ def translate_with_gemini(text, api_key, source_lang="Russian",
             model="gemini-2.5-flash",
             contents=prompt
         )
-
         if response.text:
             return response.text.strip()
         else:
             return "[API Error] Empty response"
-
     except Exception as e:
         return f"[API Error] {str(e)}"
