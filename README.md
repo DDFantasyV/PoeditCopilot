@@ -1,5 +1,5 @@
 # Poedit Copilot
-A copilot program for editing localized files.<br>
+A copilot program for editing localized **MO/PO** files.<br>
 It integrates most commonly used functions, and can realize the functions of importing, comparing, editing, and exporting entries.<br>
 In addition, **Poedit Copilot** also provides LLM API to assist in translation.
 

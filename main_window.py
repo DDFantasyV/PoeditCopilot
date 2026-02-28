@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog
+from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog
 from workers import TranslatorWorker
 
 
@@ -47,19 +47,32 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("File")
 
         new_action = QAction("New", self)
+        new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self.new_project)
         file_menu.addAction(new_action)
 
         load_project_action = QAction("Load Project", self)
+        load_project_action.setShortcut("Ctrl+O")
         load_project_action.triggered.connect(self.load_progress)
         file_menu.addAction(load_project_action)
 
         save_project_action = QAction("Save Project", self)
+        save_project_action.setShortcut("Ctrl+S")
         save_project_action.triggered.connect(self.save_progress)
         file_menu.addAction(save_project_action)
 
         # 编辑菜单
         edit_menu = menubar.addMenu("Edit")
+
+        find_action = QAction("Find", self)
+        find_action.setShortcut("Ctrl+F")
+        find_action.triggered.connect(self.show_find_dialog)
+        edit_menu.addAction(find_action)
+
+        replace_action = QAction("Replace", self)
+        replace_action.setShortcut("Ctrl+H")
+        replace_action.triggered.connect(self.show_replace_dialog)
+        edit_menu.addAction(replace_action)
 
         # 翻译菜单
         trans_menu = menubar.addMenu("Translate")
@@ -133,6 +146,202 @@ class MainWindow(QMainWindow):
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
         self.current_idx = -1
+
+    def show_find_dialog(self):
+        if not hasattr(self, 'find_dialog'):
+            self.find_dialog = FindReplaceDialog(self, is_replace=False)
+            self.find_dialog.btn_find_prev.clicked.connect(lambda: self.do_find(is_replace_dialog=False, forward=False))
+            self.find_dialog.btn_find.clicked.connect(lambda: self.do_find(is_replace_dialog=False, forward=True))
+        self.find_dialog.show()
+        self.find_dialog.raise_()
+        self.find_dialog.activateWindow()
+
+    def show_replace_dialog(self):
+        if not hasattr(self, 'replace_dialog'):
+            self.replace_dialog = FindReplaceDialog(self, is_replace=True)
+            self.replace_dialog.btn_find_prev.clicked.connect(lambda: self.do_find(is_replace_dialog=True, forward=False))
+            self.replace_dialog.btn_find.clicked.connect(lambda: self.do_find(is_replace_dialog=True, forward=True))
+            self.replace_dialog.btn_replace.clicked.connect(self.do_replace)
+            self.replace_dialog.btn_replace_all.clicked.connect(self.do_replace_all)
+        self.replace_dialog.show()
+        self.replace_dialog.raise_()
+        self.replace_dialog.activateWindow()
+
+    def _match_text(self, search_text, target_text, ignore_case, exact_match, whole_word):
+        if not target_text: return False
+        if exact_match:
+            if ignore_case:
+                return search_text.lower() == target_text.lower()
+            return search_text == target_text
+
+        flags = re.IGNORECASE if ignore_case else 0
+        pattern = re.escape(search_text)
+        if whole_word:
+            pattern = r'\b' + pattern + r'\b'
+        try:
+            return bool(re.search(pattern, target_text, flags))
+        except Exception:
+            return False
+
+    def _replace_in_text(self, target_text, search_text, replace_text, ignore_case, exact_match, whole_word):
+        if not target_text: return target_text
+        if exact_match:
+            if ignore_case and search_text.lower() == target_text.lower():
+                return replace_text
+            elif not ignore_case and search_text == target_text:
+                return replace_text
+            return target_text
+
+        flags = re.IGNORECASE if ignore_case else 0
+        pattern = re.escape(search_text)
+        if whole_word:
+            pattern = r'\b' + pattern + r'\b'
+        try:
+            return re.sub(pattern, replace_text, target_text, flags=flags)
+        except Exception:
+            return target_text
+
+    def do_find(self, is_replace_dialog=False, forward=True):
+        dlg = self.replace_dialog if is_replace_dialog else self.find_dialog
+        search_text = dlg.txt_find.text()
+        if not search_text: return
+
+        ignore_case = dlg.chk_ignore_case.isChecked()
+        exact_match = dlg.chk_exact_match.isChecked()
+        whole_word = dlg.chk_whole_word.isChecked()
+
+        row_count = self.left_table.rowCount()
+        if row_count == 0:
+            return
+
+        current_row = self.left_table.currentRow()
+
+        if current_row < 0:
+            start_row = 0 if forward else row_count - 1
+        else:
+            if forward:
+                start_row = (current_row + 1) % row_count
+            else:
+                start_row = (current_row - 1) % row_count
+
+        for i in range(row_count):
+            if forward:
+                row = (start_row + i) % row_count
+            else:
+                row = (start_row - i) % row_count
+
+            real_idx = self.left_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            entry = self.po_entries[real_idx]
+
+            texts_to_search = [
+                str(entry.get('msgid', '')),
+                entry.get('new_ru_text', ''),
+                entry.get('old_ru_text', '')
+            ]
+
+            if entry['is_plural']:
+                for val in entry.get('translated_plural', {}).values():
+                    texts_to_search.append(str(val))
+            else:
+                texts_to_search.append(str(entry.get('translated_text', '')))
+
+            match_found = False
+            for text in texts_to_search:
+                if self._match_text(search_text, text, ignore_case, exact_match, whole_word):
+                    match_found = True
+                    break
+
+            if match_found:
+                self.left_table.selectRow(row)
+                self.right_table.selectRow(row)
+                self.on_table_click(self.left_table.item(row, 0))
+                self.left_table.scrollToItem(self.left_table.item(row, 0))
+                return
+
+        QMessageBox.information(self, "Find", "No further matches.")
+
+    def do_replace(self):
+        row = self.left_table.currentRow()
+        if row < 0:
+            self.do_find(True, forward=True)
+            return
+
+        dlg = self.replace_dialog
+        search_text = dlg.txt_find.text()
+        replace_text = dlg.txt_replace.text()
+        if not search_text: return
+
+        ignore_case = dlg.chk_ignore_case.isChecked()
+        exact_match = dlg.chk_exact_match.isChecked()
+        whole_word = dlg.chk_whole_word.isChecked()
+
+        real_idx = self.left_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        entry = self.po_entries[real_idx]
+
+        changed = False
+        if entry['is_plural']:
+            new_plural = {}
+            for k, v in entry.get('translated_plural', {}).items():
+                new_v = self._replace_in_text(v, search_text, replace_text, ignore_case, exact_match, whole_word)
+                if new_v != v: changed = True
+                new_plural[k] = new_v
+            if changed: entry['translated_plural'] = new_plural
+        else:
+            old_val = entry.get('translated_text', '')
+            new_val = self._replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match, whole_word)
+            if new_val != old_val:
+                entry['translated_text'] = new_val
+                changed = True
+
+        if changed:
+            entry['status'] = 'Saved'
+            self.refresh_ui()
+            # UI刷新后保持行选中状态
+            for r in range(self.left_table.rowCount()):
+                if self.left_table.item(r, 0).data(Qt.ItemDataRole.UserRole) == real_idx:
+                    self.left_table.selectRow(r)
+                    self.right_table.selectRow(r)
+                    break
+
+        self.do_find(True, forward=True)
+
+    def do_replace_all(self):
+        dlg = self.replace_dialog
+        search_text = dlg.txt_find.text()
+        replace_text = dlg.txt_replace.text()
+        if not search_text: return
+
+        ignore_case = dlg.chk_ignore_case.isChecked()
+        exact_match = dlg.chk_exact_match.isChecked()
+        whole_word = dlg.chk_whole_word.isChecked()
+
+        count = 0
+        for entry in self.po_entries:
+            changed = False
+            if entry['is_plural']:
+                new_plural = {}
+                for k, v in entry.get('translated_plural', {}).items():
+                    new_v = self._replace_in_text(v, search_text, replace_text, ignore_case, exact_match, whole_word)
+                    if new_v != v: changed = True
+                    new_plural[k] = new_v
+                if changed: entry['translated_plural'] = new_plural
+            else:
+                old_val = entry.get('translated_text', '')
+                new_val = self._replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match,
+                                                whole_word)
+                if new_val != old_val:
+                    entry['translated_text'] = new_val
+                    changed = True
+
+            if changed:
+                entry['status'] = 'Saved'
+                count += 1
+
+        if count > 0:
+            self.refresh_ui()
+            QMessageBox.information(self, "Replace all", f"Replace Completed. {count} total.")
+        else:
+            QMessageBox.information(self, "Replace all", "No further matches.")
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
