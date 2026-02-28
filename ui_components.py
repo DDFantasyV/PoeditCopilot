@@ -3,7 +3,6 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout)
 from PyQt6.QtCore import Qt
 
-
 class LogWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -20,6 +19,12 @@ class LogWindow(QWidget):
     def log(self, message):
         self.text_edit.append(message)
         self.text_edit.verticalScrollBar().setValue(self.text_edit.verticalScrollBar().maximum())
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            event.ignore()
+        else:
+            super().keyPressEvent(event)
 
 class LargeInputDialog(QInputDialog):
     def __init__(self, parent=None, title="", label="", text=""):
@@ -45,7 +50,7 @@ class LargeInputDialog(QInputDialog):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.reject()
+            event.ignore()
         else:
             super().keyPressEvent(event)
 
@@ -58,7 +63,6 @@ class FindReplaceDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout()
-
         grid = QGridLayout()
         self.lbl_find = QLabel("Find:")
         self.txt_find = QLineEdit()
@@ -101,4 +105,9 @@ class FindReplaceDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
 
         layout.addLayout(btn_layout)
-        self.setLayout(layout)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            event.ignore()
+        else:
+            super().keyPressEvent(event)

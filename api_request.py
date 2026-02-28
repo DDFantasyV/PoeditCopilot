@@ -1,17 +1,11 @@
 from google import genai
 from functools import lru_cache
 
-
 @lru_cache(maxsize=1)
 def get_gemini_client(api_key):
-    """缓存 Gemini Client，避免每次翻译都重新实例化"""
     return genai.Client(api_key=api_key)
 
 def validate_api_key(api_key):
-    """
-    验证 API Key 是否有效
-    :return: (bool, str) -> (是否成功, 错误信息/成功信息)
-    """
     if not api_key or not api_key.strip():
         return False, "API Key cannot be empty"
 
@@ -28,11 +22,7 @@ def validate_api_key(api_key):
     except Exception as e:
         return False, f"Verify Error: {str(e)}"
 
-def translate_with_gemini(text, api_key, source_lang="Russian",
-                          target_lang="Simplified Chinese (for Game Localization)"):
-    """
-    调用 Google Genai 进行翻译
-    """
+def translate_with_gemini(text, api_key, source_lang="Russian", target_lang="Simplified Chinese (for Game Localization)"):
     if not text or not text.strip():
         return ""
 
@@ -62,4 +52,4 @@ def translate_with_gemini(text, api_key, source_lang="Russian",
         else:
             return "[API Error] Empty response"
     except Exception as e:
-        return f"[API Error] {str(e)}"
+        return f"[Translation Error] {str(e)}"

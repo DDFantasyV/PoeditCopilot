@@ -1,7 +1,5 @@
 import sys
 import os
-import polib
-import pickle
 import re
 import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -13,6 +11,8 @@ from PyQt6.QtGui import QColor, QAction
 import api_request
 from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog
 from workers import TranslatorWorker
+from po_manager import POManager
+from search_engine import SearchEngine
 
 
 class MainWindow(QMainWindow):
@@ -30,9 +30,10 @@ class MainWindow(QMainWindow):
             from version import __version__ as app_version
         except ImportError:
             app_version = "0.0.0"
-        self.setWindowTitle(f"Poedit Copilot v{app_version}")
 
-        self.po_entries = []
+        self.setWindowTitle(f"Poedit Copilot v{app_version}")
+        self.po_manager = POManager()
+        self.current_idx = -1
 
         self.log_window = LogWindow()
         self.log_window.show()
@@ -43,9 +44,7 @@ class MainWindow(QMainWindow):
     def init_menu(self):
         menubar = self.menuBar()
 
-        # 文件菜单
         file_menu = menubar.addMenu("File")
-
         new_action = QAction("New", self)
         new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self.new_project)
@@ -61,9 +60,7 @@ class MainWindow(QMainWindow):
         save_project_action.triggered.connect(self.save_progress)
         file_menu.addAction(save_project_action)
 
-        # 编辑菜单
         edit_menu = menubar.addMenu("Edit")
-
         find_action = QAction("Find", self)
         find_action.setShortcut("Ctrl+F")
         find_action.triggered.connect(self.show_find_dialog)
@@ -74,9 +71,7 @@ class MainWindow(QMainWindow):
         replace_action.triggered.connect(self.show_replace_dialog)
         edit_menu.addAction(replace_action)
 
-        # 翻译菜单
         trans_menu = menubar.addMenu("Translate")
-
         ai_trans_action = QAction("AI Translate", self)
         ai_trans_action.triggered.connect(self.start_ai_trans)
         trans_menu.addAction(ai_trans_action)
@@ -145,7 +140,6 @@ class MainWindow(QMainWindow):
 
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
-        self.current_idx = -1
 
     def show_find_dialog(self):
         if not hasattr(self, 'find_dialog'):
@@ -159,47 +153,14 @@ class MainWindow(QMainWindow):
     def show_replace_dialog(self):
         if not hasattr(self, 'replace_dialog'):
             self.replace_dialog = FindReplaceDialog(self, is_replace=True)
-            self.replace_dialog.btn_find_prev.clicked.connect(lambda: self.do_find(is_replace_dialog=True, forward=False))
+            self.replace_dialog.btn_find_prev.clicked.connect(
+                lambda: self.do_find(is_replace_dialog=True, forward=False))
             self.replace_dialog.btn_find.clicked.connect(lambda: self.do_find(is_replace_dialog=True, forward=True))
             self.replace_dialog.btn_replace.clicked.connect(self.do_replace)
             self.replace_dialog.btn_replace_all.clicked.connect(self.do_replace_all)
         self.replace_dialog.show()
         self.replace_dialog.raise_()
         self.replace_dialog.activateWindow()
-
-    def _match_text(self, search_text, target_text, ignore_case, exact_match, whole_word):
-        if not target_text: return False
-        if exact_match:
-            if ignore_case:
-                return search_text.lower() == target_text.lower()
-            return search_text == target_text
-
-        flags = re.IGNORECASE if ignore_case else 0
-        pattern = re.escape(search_text)
-        if whole_word:
-            pattern = r'\b' + pattern + r'\b'
-        try:
-            return bool(re.search(pattern, target_text, flags))
-        except Exception:
-            return False
-
-    def _replace_in_text(self, target_text, search_text, replace_text, ignore_case, exact_match, whole_word):
-        if not target_text: return target_text
-        if exact_match:
-            if ignore_case and search_text.lower() == target_text.lower():
-                return replace_text
-            elif not ignore_case and search_text == target_text:
-                return replace_text
-            return target_text
-
-        flags = re.IGNORECASE if ignore_case else 0
-        pattern = re.escape(search_text)
-        if whole_word:
-            pattern = r'\b' + pattern + r'\b'
-        try:
-            return re.sub(pattern, replace_text, target_text, flags=flags)
-        except Exception:
-            return target_text
 
     def do_find(self, is_replace_dialog=False, forward=True):
         dlg = self.replace_dialog if is_replace_dialog else self.find_dialog
@@ -209,34 +170,23 @@ class MainWindow(QMainWindow):
         ignore_case = dlg.chk_ignore_case.isChecked()
         exact_match = dlg.chk_exact_match.isChecked()
         whole_word = dlg.chk_whole_word.isChecked()
+        compiled_pattern = SearchEngine.get_compiled_pattern(search_text, ignore_case, whole_word)
 
         row_count = self.left_table.rowCount()
-        if row_count == 0:
-            return
+        if row_count == 0: return
 
         current_row = self.left_table.currentRow()
-
-        if current_row < 0:
-            start_row = 0 if forward else row_count - 1
-        else:
-            if forward:
-                start_row = (current_row + 1) % row_count
-            else:
-                start_row = (current_row - 1) % row_count
+        start_row = 0 if forward else row_count - 1
+        if current_row >= 0:
+            start_row = (current_row + 1) % row_count if forward else (current_row - 1) % row_count
 
         for i in range(row_count):
-            if forward:
-                row = (start_row + i) % row_count
-            else:
-                row = (start_row - i) % row_count
-
+            row = (start_row + i) % row_count if forward else (start_row - i) % row_count
             real_idx = self.left_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-            entry = self.po_entries[real_idx]
+            entry = self.po_manager.entries[real_idx]
 
             texts_to_search = [
-                str(entry.get('msgid', '')),
-                entry.get('new_ru_text', ''),
-                entry.get('old_ru_text', '')
+                str(entry.get('msgid', '')), entry.get('new_ru_text', ''), entry.get('old_ru_text', '')
             ]
 
             if entry['is_plural']:
@@ -245,11 +195,8 @@ class MainWindow(QMainWindow):
             else:
                 texts_to_search.append(str(entry.get('translated_text', '')))
 
-            match_found = False
-            for text in texts_to_search:
-                if self._match_text(search_text, text, ignore_case, exact_match, whole_word):
-                    match_found = True
-                    break
+            match_found = any(SearchEngine.match_text(search_text, text, ignore_case, exact_match, compiled_pattern)
+                              for text in texts_to_search)
 
             if match_found:
                 self.left_table.selectRow(row)
@@ -274,21 +221,24 @@ class MainWindow(QMainWindow):
         ignore_case = dlg.chk_ignore_case.isChecked()
         exact_match = dlg.chk_exact_match.isChecked()
         whole_word = dlg.chk_whole_word.isChecked()
+        compiled_pattern = SearchEngine.get_compiled_pattern(search_text, ignore_case, whole_word)
 
         real_idx = self.left_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        entry = self.po_entries[real_idx]
+        entry = self.po_manager.entries[real_idx]
 
         changed = False
         if entry['is_plural']:
             new_plural = {}
             for k, v in entry.get('translated_plural', {}).items():
-                new_v = self._replace_in_text(v, search_text, replace_text, ignore_case, exact_match, whole_word)
+                new_v = SearchEngine.replace_in_text(v, search_text, replace_text, ignore_case, exact_match,
+                                                     compiled_pattern)
                 if new_v != v: changed = True
                 new_plural[k] = new_v
             if changed: entry['translated_plural'] = new_plural
         else:
             old_val = entry.get('translated_text', '')
-            new_val = self._replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match, whole_word)
+            new_val = SearchEngine.replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match,
+                                                   compiled_pattern)
             if new_val != old_val:
                 entry['translated_text'] = new_val
                 changed = True
@@ -296,7 +246,6 @@ class MainWindow(QMainWindow):
         if changed:
             entry['status'] = 'Saved'
             self.refresh_ui()
-            # UI刷新后保持行选中状态
             for r in range(self.left_table.rowCount()):
                 if self.left_table.item(r, 0).data(Qt.ItemDataRole.UserRole) == real_idx:
                     self.left_table.selectRow(r)
@@ -314,21 +263,23 @@ class MainWindow(QMainWindow):
         ignore_case = dlg.chk_ignore_case.isChecked()
         exact_match = dlg.chk_exact_match.isChecked()
         whole_word = dlg.chk_whole_word.isChecked()
+        compiled_pattern = SearchEngine.get_compiled_pattern(search_text, ignore_case, whole_word)
 
         count = 0
-        for entry in self.po_entries:
+        for entry in self.po_manager.entries:
             changed = False
             if entry['is_plural']:
                 new_plural = {}
                 for k, v in entry.get('translated_plural', {}).items():
-                    new_v = self._replace_in_text(v, search_text, replace_text, ignore_case, exact_match, whole_word)
+                    new_v = SearchEngine.replace_in_text(v, search_text, replace_text, ignore_case, exact_match,
+                                                         compiled_pattern)
                     if new_v != v: changed = True
                     new_plural[k] = new_v
                 if changed: entry['translated_plural'] = new_plural
             else:
                 old_val = entry.get('translated_text', '')
-                new_val = self._replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match,
-                                                whole_word)
+                new_val = SearchEngine.replace_in_text(old_val, search_text, replace_text, ignore_case, exact_match,
+                                                       compiled_pattern)
                 if new_val != old_val:
                     entry['translated_text'] = new_val
                     changed = True
@@ -355,7 +306,7 @@ class MainWindow(QMainWindow):
             self.log("Translation cancelled: No valid API Key.")
             return
 
-        self.worker = TranslatorWorker(self.po_entries, api_key)
+        self.worker = TranslatorWorker(self.po_manager.entries, api_key)
         self.worker.log_signal.connect(self.log)
         self.worker.finished.connect(self.on_ai_finished)
         self.worker.start()
@@ -409,18 +360,8 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "1. Choose NEW Original MO", "", "MO Files (*.mo)")
         if not path: return
         try:
-            mo = polib.mofile(path)
-            self.po_entries = []
-            for idx, entry in enumerate(mo):
-                is_plural = bool(entry.msgid_plural)
-                new_ru_text = entry.msgstr_plural.get(0, "") if is_plural else entry.msgstr
-                self.po_entries.append({
-                    'entry_id': idx + 1, 'msgid': entry.msgid, 'is_plural': is_plural,
-                    'msgid_plural': entry.msgid_plural if is_plural else '',
-                    'new_ru_text': new_ru_text, 'old_ru_text': '', 'status': 'New',
-                    'translated_text': '', 'translated_plural': {}
-                })
-            self.log(f"Load NEW File Completed: {len(self.po_entries)}")
+            count = self.po_manager.load_new_mo(path)
+            self.log(f"Load NEW File Completed: {count}")
             self.refresh_ui()
             self.btn_load_new_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
@@ -428,35 +369,11 @@ class MainWindow(QMainWindow):
             self.btn_load_new_ru.setStyleSheet("background-color: rgb(255, 200, 200);")
 
     def load_old_ru(self):
-        if not self.po_entries: return
+        if not self.po_manager.entries: return
         path, _ = QFileDialog.getOpenFileName(self, "2. Choose OLD Original MO", "", "MO Files (*.mo)")
         if not path: return
         try:
-            old_mo = polib.mofile(path)
-            old_map = {e.msgid: e for e in old_mo}
-            new_ids = set()
-
-            for item in self.po_entries:
-                mid = item['msgid']
-                new_ids.add(mid)
-                if mid in old_map:
-                    old_entry = old_map[mid]
-                    item['old_ru_text'] = old_entry.msgstr_plural.get(0, "") if item['is_plural'] else old_entry.msgstr
-
-                    plural_changed = item['is_plural'] and (old_entry.msgid_plural != item['msgid_plural'])
-                    text_changed = (item['new_ru_text'] != item['old_ru_text'])
-
-                    item['status'] = 'Modified' if (text_changed or plural_changed) else 'Normal'
-                else:
-                    item['status'] = 'New'
-
-            for entry in old_mo:
-                if entry.msgid not in new_ids:
-                    self.po_entries.append({
-                        'entry_id': -1, 'msgid': entry.msgid, 'is_plural': bool(entry.msgid_plural),
-                        'msgid_plural': entry.msgid_plural, 'new_ru_text': '', 'old_ru_text': entry.msgstr,
-                        'status': 'Deleted', 'translated_text': '', 'translated_plural': {}
-                    })
+            self.po_manager.load_old_mo(path)
             self.log("Compared Completed.")
             self.refresh_ui()
             self.btn_load_old_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
@@ -465,24 +382,11 @@ class MainWindow(QMainWindow):
             self.btn_load_old_ru.setStyleSheet("background-color: rgb(255, 200, 200);")
 
     def load_old_cn(self):
-        if not self.po_entries: return
+        if not self.po_manager.entries: return
         path, _ = QFileDialog.getOpenFileName(self, "3. Choose OLD Translated MO", "", "MO Files (*.mo)")
         if not path: return
         try:
-            cn_mo = polib.mofile(path)
-            cn_map = {e.msgid: e for e in cn_mo}
-            count = 0
-            for item in self.po_entries:
-                if item['msgid'] in cn_map:
-                    target_entry = cn_map[item['msgid']]
-                    if item['is_plural']:
-                        if target_entry.msgstr_plural:
-                            item['translated_plural'] = target_entry.msgstr_plural.copy()
-                        elif target_entry.msgstr:
-                            item['translated_plural'] = {0: target_entry.msgstr}
-                    else:
-                        item['translated_text'] = target_entry.msgstr
-                    count += 1
+            count = self.po_manager.load_translated_mo(path)
             self.log(f"Translation Loaded. {count} Paired.")
             self.refresh_ui()
             self.btn_load_old_cn.setStyleSheet("background-color: rgb(200, 255, 200);")
@@ -495,30 +399,7 @@ class MainWindow(QMainWindow):
         if not save_path: return
 
         try:
-            new_po = polib.POFile(wrapwidth=0)
-            new_po.metadata = {
-                'Project-Id-Version': 'Mir Korabley',
-                'Last-Translator': 'DDF_FantasyV',
-                'Language-Team': '<REPAD Localization Team>',
-                'Language': 'zh_SG',
-                'Content-Type': 'text/plain; charset=UTF-8',
-                'Content-Transfer-Encoding': '8bit',
-                'Plural-Forms': 'nplurals=1; plural=0;'
-            }
-            count = 0
-            for item in self.po_entries:
-                if item['status'] == 'Deleted': continue
-                if item['is_plural']:
-                    clean_plural_dict = {int(k): str(v) for k, v in item['translated_plural'].items()}
-                    entry = polib.POEntry(msgid=item['msgid'], msgid_plural=item['msgid_plural'],
-                                          msgstr_plural=clean_plural_dict)
-                else:
-                    entry = polib.POEntry(msgid=item['msgid'], msgstr=item['translated_text'])
-                new_po.append(entry)
-                count += 1
-
-            new_po.save_as_mofile(save_path)
-            new_po.save(save_path.replace('.mo', '.po'))
+            count = self.po_manager.export_mo(save_path)
             QMessageBox.information(self, "Completed", f"Export Completed！{count} Total.")
             self.btn_final.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
@@ -533,8 +414,8 @@ class MainWindow(QMainWindow):
         self.left_table.setRowCount(0)
         self.right_table.setRowCount(0)
 
-        modified_list = [(idx, item) for idx, item in enumerate(self.po_entries) if item['status'] != 'Normal']
-        normal_list = [(idx, item) for idx, item in enumerate(self.po_entries) if item['status'] == 'Normal']
+        modified_list = [(idx, item) for idx, item in enumerate(self.po_manager.entries) if item['status'] != 'Normal']
+        normal_list = [(idx, item) for idx, item in enumerate(self.po_manager.entries) if item['status'] == 'Normal']
         display_list = modified_list + normal_list
 
         self.left_table.setRowCount(len(display_list))
@@ -558,7 +439,6 @@ class MainWindow(QMainWindow):
             self._set_item(self.left_table, row, 0, id_str, color, real_idx)
             self._set_item(self.left_table, row, 1, item['new_ru_text'], color, real_idx)
             self._set_item(self.left_table, row, 2, item['old_ru_text'], color, real_idx)
-
             self._set_item(self.right_table, row, 0, st, color, real_idx)
 
             if item['is_plural']:
@@ -570,7 +450,6 @@ class MainWindow(QMainWindow):
             act_txt = "TBD" if st in ['New', 'Modified'] else ""
             self._set_item(self.right_table, row, 2, act_txt, color, real_idx)
 
-        # 恢复表格更新
         self.left_table.setUpdatesEnabled(True)
         self.right_table.setUpdatesEnabled(True)
 
@@ -584,30 +463,27 @@ class MainWindow(QMainWindow):
         idx = item.data(Qt.ItemDataRole.UserRole)
         if idx is None: return
         self.current_idx = idx
-        entry = self.po_entries[idx]
+        entry = self.po_manager.entries[idx]
         source_show = f"[Plural ID] {entry['msgid_plural']}\n[Singular Source] {entry['new_ru_text']}" if entry[
             'is_plural'] else entry['new_ru_text']
         self.lbl_id.setText(f"ID: {entry['msgid']}")
         self.lbl_source.setText(f"Source: {source_show}")
+
         is_del = (entry['status'] == 'Deleted')
         self.btn_accept.setEnabled(not is_del)
         self.btn_edit.setEnabled(not is_del)
 
     def action_accept(self):
         if self.current_idx < 0: return
-        self.po_entries[self.current_idx]['status'] = 'Saved'
+        self.po_manager.entries[self.current_idx]['status'] = 'Saved'
         self.refresh_ui()
 
     def action_edit(self):
         if self.current_idx < 0: return
-        entry = self.po_entries[self.current_idx]
+        entry = self.po_manager.entries[self.current_idx]
         if entry['is_plural']:
             current_dict = entry['translated_plural']
-            if not current_dict:
-                edit_text = "[0]: "
-            else:
-                edit_text = "\n".join([f"[{k}]: {v}" for k, v in sorted(current_dict.items())])
-
+            edit_text = "\n".join([f"[{k}]: {v}" for k, v in sorted(current_dict.items())]) if current_dict else "[0]: "
             instruction = "Format: [Index]: Content\nNormally index is only [0]"
             dlg = LargeInputDialog(self, "Edit Plural Translation", instruction, edit_text)
             if dlg.exec():
@@ -633,7 +509,7 @@ class MainWindow(QMainWindow):
                 self.refresh_ui()
 
     def on_ai_finished(self, idx, text_str, text_dict):
-        entry = self.po_entries[idx]
+        entry = self.po_manager.entries[idx]
         if entry['is_plural']:
             entry['translated_plural'] = text_dict
         else:
@@ -643,15 +519,13 @@ class MainWindow(QMainWindow):
     def save_progress(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Project", "progress.tmp", "Tmp (*.tmp)")
         if path:
-            with open(path, 'wb') as f:
-                pickle.dump(self.po_entries, f)
+            self.po_manager.save_progress(path)
             self.log("Project Saved")
 
     def load_progress(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Project", "", "Tmp (*.tmp)")
         if path:
-            with open(path, 'rb') as f:
-                self.po_entries = pickle.load(f)
+            self.po_manager.load_progress(path)
             self.refresh_ui()
 
     def closeEvent(self, event):
@@ -660,13 +534,14 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def new_project(self):
-        if self.po_entries:
-            reply = QMessageBox.question(self, 'New Project', 'Create a new project? ALL unsaved progress will be lost!',
+        if self.po_manager.entries:
+            reply = QMessageBox.question(self, 'New Project',
+                                         'Create a new project? ALL unsaved progress will be lost!',
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-        self.po_entries = []
+        self.po_manager.clear()
         self.current_idx = -1
         self.left_table.setRowCount(0)
         self.right_table.setRowCount(0)

@@ -2,7 +2,6 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 import api_request
 
-
 class TranslatorWorker(QThread):
     finished = pyqtSignal(int, str, dict)
     log_signal = pyqtSignal(str)
@@ -26,20 +25,14 @@ class TranslatorWorker(QThread):
             should_translate = (row['status'] == 'New' and not has_trans) or (row['status'] == 'Modified')
 
             if should_translate:
-                original_text = row.get('new_ru_text', '')
-                if not original_text:
-                    original_text = row['msgid']
-
+                original_text = row.get('new_ru_text', '') or row['msgid']
                 trans_str = ""
                 trans_dict = {}
 
                 try:
                     raw_result = api_request.translate_with_gemini(original_text, self.api_key)
-                    if "Error" in raw_result:
-                        ai_result = raw_result
-                    else:
-                        ai_result = f"[AI] {raw_result}"
-                    time.sleep(1.0) # 保持休眠防止触发API速率限制
+                    ai_result = raw_result if "Error" in raw_result else f"[AI] {raw_result}"
+                    time.sleep(1.0)
                 except Exception as e:
                     ai_result = f"Error: {str(e)}"
                     self.log_signal.emit(f"API Error: {str(e)}")
@@ -63,4 +56,4 @@ class TranslatorWorker(QThread):
 
                 self.finished.emit(i, trans_str, trans_dict)
 
-        self.log_signal.emit(">>> Translation Completed.")
+        self.log_signal.emit(">>> Translation Process Finished.")
