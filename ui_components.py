@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout)
 from PyQt6.QtCore import Qt
 
+
 class LogWindow(QWidget):
     def __init__(self):
         super().__init__()

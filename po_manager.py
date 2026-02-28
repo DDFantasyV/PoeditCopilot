@@ -1,6 +1,7 @@
 import polib
 import pickle
 
+
 class POManager:
     def __init__(self):
         self.entries = []

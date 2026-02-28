@@ -1,4 +1,4 @@
-2026.02.28 Poedit Copilot v0.5.0
+2026.03.01 Poedit Copilot v0.5.0
 * 重构代码，提高运行效率
 
 2026.02.28 Poedit Copilot v0.4.0

@@ -2,6 +2,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 import api_request
 
+
 class TranslatorWorker(QThread):
     finished = pyqtSignal(int, str, dict)
     log_signal = pyqtSignal(str)

@@ -1,6 +1,7 @@
 from google import genai
 from functools import lru_cache
 
+
 @lru_cache(maxsize=1)
 def get_gemini_client(api_key):
     return genai.Client(api_key=api_key)
