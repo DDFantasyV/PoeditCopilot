@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog, FinalReviewDialog
+from ui_components import LogWindow, LargeInputDialog
 from workers import TranslatorWorker
 
 
@@ -76,12 +76,12 @@ class MainWindow(QMainWindow):
         self.btn_load_new_ru = QPushButton("1. Load NEW Original MO")
         self.btn_load_old_ru = QPushButton("2. Load OLD Original MO")
         self.btn_load_old_cn = QPushButton("3. Load OLD Translated MO")
-        self.btn_final = QPushButton("4. Review and Export")
+        self.btn_final = QPushButton("4. Export NEW Translated MO")
 
         self.btn_load_new_ru.clicked.connect(self.load_new_ru)
         self.btn_load_old_ru.clicked.connect(self.load_old_ru)
         self.btn_load_old_cn.clicked.connect(self.load_old_cn)
-        self.btn_final.clicked.connect(self.show_final_dialog)
+        self.btn_final.clicked.connect(self.do_export)
 
         top_group.addWidget(self.btn_load_new_ru)
         top_group.addWidget(self.btn_load_old_ru)
@@ -282,7 +282,9 @@ class MainWindow(QMainWindow):
         self.left_table.setRowCount(0)
         self.right_table.setRowCount(0)
 
-        display_list = [(idx, item) for idx, item in enumerate(self.po_entries) if item['status'] != 'Normal']
+        modified_list = [(idx, item) for idx, item in enumerate(self.po_entries) if item['status'] != 'Normal']
+        normal_list = [(idx, item) for idx, item in enumerate(self.po_entries) if item['status'] == 'Normal']
+        display_list = modified_list + normal_list
 
         self.left_table.setRowCount(len(display_list))
         self.right_table.setRowCount(len(display_list))
@@ -400,11 +402,6 @@ class MainWindow(QMainWindow):
             with open(path, 'rb') as f:
                 self.po_entries = pickle.load(f)
             self.refresh_ui()
-
-    def show_final_dialog(self):
-        d = FinalReviewDialog(self.po_entries, self)
-        if d.exec():
-            self.do_export()
 
     def do_export(self):
         save_path, _ = QFileDialog.getSaveFileName(self, "Export NEW Translated MO", "global.mo", "MO Files (*.mo)")
