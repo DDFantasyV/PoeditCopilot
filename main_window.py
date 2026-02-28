@@ -213,8 +213,10 @@ class MainWindow(QMainWindow):
                 })
             self.log(f"Load NEW File Completed: {len(self.po_entries)}")
             self.refresh_ui()
+            self.btn_load_new_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
             self.log(f"Error: {e}")
+            self.btn_load_new_ru.setStyleSheet("background-color: rgb(255, 200, 200);")
 
     def load_old_ru(self):
         if not self.po_entries: return
@@ -248,8 +250,10 @@ class MainWindow(QMainWindow):
                     })
             self.log("Compared Completed.")
             self.refresh_ui()
+            self.btn_load_old_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
             self.log(f"Error: {e}")
+            self.btn_load_old_ru.setStyleSheet("background-color: rgb(255, 200, 200);")
 
     def load_old_cn(self):
         if not self.po_entries: return
@@ -272,8 +276,46 @@ class MainWindow(QMainWindow):
                     count += 1
             self.log(f"Translation Loaded. {count} Paired.")
             self.refresh_ui()
+            self.btn_load_old_cn.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
             self.log(f"Error: {e}")
+            self.btn_load_old_cn.setStyleSheet("background-color: rgb(255, 200, 200);")
+
+    def do_export(self):
+        save_path, _ = QFileDialog.getSaveFileName(self, "Export NEW Translated MO", "global.mo", "MO Files (*.mo)")
+        if not save_path: return
+
+        try:
+            new_po = polib.POFile(wrapwidth=0)
+            new_po.metadata = {
+                'Project-Id-Version': 'Mir Korabley',
+                'Last-Translator': 'DDF_FantasyV',
+                'Language-Team': '<REPAD Localization Team>',
+                'Language': 'zh_SG',
+                'Content-Type': 'text/plain; charset=UTF-8',
+                'Content-Transfer-Encoding': '8bit',
+                'Plural-Forms': 'nplurals=1; plural=0;'
+            }
+            count = 0
+            for item in self.po_entries:
+                if item['status'] == 'Deleted': continue
+                if item['is_plural']:
+                    clean_plural_dict = {int(k): str(v) for k, v in item['translated_plural'].items()}
+                    entry = polib.POEntry(msgid=item['msgid'], msgid_plural=item['msgid_plural'],
+                                          msgstr_plural=clean_plural_dict)
+                else:
+                    entry = polib.POEntry(msgid=item['msgid'], msgstr=item['translated_text'])
+                new_po.append(entry)
+                count += 1
+
+            new_po.save_as_mofile(save_path)
+            new_po.save(save_path.replace('.mo', '.po'))
+            QMessageBox.information(self, "Completed", f"Export Completed！{count} Total.")
+            self.btn_final.setStyleSheet("background-color: rgb(200, 255, 200);")
+        except Exception as e:
+            self.log(f"Error: {e}")
+            QMessageBox.critical(self, "Error", str(e))
+            self.btn_final.setStyleSheet("background-color: rgb(255, 200, 200);")
 
     def refresh_ui(self):
         self.left_table.setUpdatesEnabled(False)
@@ -403,40 +445,6 @@ class MainWindow(QMainWindow):
                 self.po_entries = pickle.load(f)
             self.refresh_ui()
 
-    def do_export(self):
-        save_path, _ = QFileDialog.getSaveFileName(self, "Export NEW Translated MO", "global.mo", "MO Files (*.mo)")
-        if not save_path: return
-
-        try:
-            new_po = polib.POFile(wrapwidth=0)
-            new_po.metadata = {
-                'Project-Id-Version': 'Mir Korabley',
-                'Last-Translator': 'DDF_FantasyV',
-                'Language-Team': '<REPAD Localization Team>',
-                'Language': 'zh_SG',
-                'Content-Type': 'text/plain; charset=UTF-8',
-                'Content-Transfer-Encoding': '8bit',
-                'Plural-Forms': 'nplurals=1; plural=0;'
-            }
-            count = 0
-            for item in self.po_entries:
-                if item['status'] == 'Deleted': continue
-                if item['is_plural']:
-                    clean_plural_dict = {int(k): str(v) for k, v in item['translated_plural'].items()}
-                    entry = polib.POEntry(msgid=item['msgid'], msgid_plural=item['msgid_plural'],
-                                          msgstr_plural=clean_plural_dict)
-                else:
-                    entry = polib.POEntry(msgid=item['msgid'], msgstr=item['translated_text'])
-                new_po.append(entry)
-                count += 1
-
-            new_po.save_as_mofile(save_path)
-            new_po.save(save_path.replace('.mo', '.po'))
-            QMessageBox.information(self, "Completed", f"Export Completed！{count} Total.")
-        except Exception as e:
-            self.log(f"Error: {e}")
-            QMessageBox.critical(self, "Error", str(e))
-
     def closeEvent(self, event):
         if hasattr(self, 'log_window'):
             self.log_window.close()
@@ -455,4 +463,10 @@ class MainWindow(QMainWindow):
         self.right_table.setRowCount(0)
         self.lbl_id.setText("ID: -")
         self.lbl_source.setText("Source: -")
+
+        self.btn_load_new_ru.setStyleSheet("")
+        self.btn_load_old_ru.setStyleSheet("")
+        self.btn_load_old_cn.setStyleSheet("")
+        self.btn_final.setStyleSheet("")
+
         self.log("New Project Created. Environment cleared.")
