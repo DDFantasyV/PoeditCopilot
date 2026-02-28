@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
                              QSplitter, QLabel, QHeaderView, QInputDialog, QMessageBox, QLineEdit)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QAction
 
 import api_request
 from ui_components import LogWindow, LargeInputDialog, FinalReviewDialog
@@ -37,7 +37,36 @@ class MainWindow(QMainWindow):
         self.log_window = LogWindow()
         self.log_window.show()
 
+        self.init_menu()
         self.init_ui()
+
+    def init_menu(self):
+        menubar = self.menuBar()
+
+        # 文件菜单
+        file_menu = menubar.addMenu("File")
+
+        new_action = QAction("New", self)
+        new_action.triggered.connect(self.new_project)
+        file_menu.addAction(new_action)
+
+        load_project_action = QAction("Load Project", self)
+        load_project_action.triggered.connect(self.load_progress)
+        file_menu.addAction(load_project_action)
+
+        save_project_action = QAction("Save Project", self)
+        save_project_action.triggered.connect(self.save_progress)
+        file_menu.addAction(save_project_action)
+
+        # 编辑菜单
+        edit_menu = menubar.addMenu("Edit")
+
+        # 翻译菜单
+        trans_menu = menubar.addMenu("Translate")
+
+        ai_trans_action = QAction("AI Translate", self)
+        ai_trans_action.triggered.connect(self.start_ai_trans)
+        trans_menu.addAction(ai_trans_action)
 
     def init_ui(self):
         main_widget = QWidget()
@@ -47,26 +76,17 @@ class MainWindow(QMainWindow):
         self.btn_load_new_ru = QPushButton("1. Load NEW Original MO")
         self.btn_load_old_ru = QPushButton("2. Load OLD Original MO")
         self.btn_load_old_cn = QPushButton("3. Load OLD Translated MO")
+        self.btn_final = QPushButton("4. Review and Export")
+
         self.btn_load_new_ru.clicked.connect(self.load_new_ru)
         self.btn_load_old_ru.clicked.connect(self.load_old_ru)
         self.btn_load_old_cn.clicked.connect(self.load_old_cn)
+        self.btn_final.clicked.connect(self.show_final_dialog)
+
         top_group.addWidget(self.btn_load_new_ru)
         top_group.addWidget(self.btn_load_old_ru)
         top_group.addWidget(self.btn_load_old_cn)
-
-        func_group = QHBoxLayout()
-        self.btn_auto_trans = QPushButton("AI Translate")
-        self.btn_temp_save = QPushButton("Save Project")
-        self.btn_temp_load = QPushButton("Load Project")
-        self.btn_final = QPushButton("Review and Export")
-        self.btn_auto_trans.clicked.connect(self.start_ai_trans)
-        self.btn_temp_save.clicked.connect(self.save_progress)
-        self.btn_temp_load.clicked.connect(self.load_progress)
-        self.btn_final.clicked.connect(self.show_final_dialog)
-        func_group.addWidget(self.btn_auto_trans)
-        func_group.addWidget(self.btn_temp_save)
-        func_group.addWidget(self.btn_temp_load)
-        func_group.addWidget(self.btn_final)
+        top_group.addWidget(self.btn_final)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.left_table = QTableWidget()
@@ -107,7 +127,6 @@ class MainWindow(QMainWindow):
         edit_group.addWidget(self.btn_edit)
 
         layout.addLayout(top_group)
-        layout.addLayout(func_group)
         layout.addWidget(splitter, 1)
         layout.addLayout(edit_group)
 
@@ -117,7 +136,9 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            event.ignore()
+        else:
+            super().keyPressEvent(event)
 
     def start_ai_trans(self):
         api_key = self.get_valid_api_key()
@@ -423,3 +444,18 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'log_window'):
             self.log_window.close()
         event.accept()
+
+    def new_project(self):
+        if self.po_entries:
+            reply = QMessageBox.question(self, 'New Project', 'Create a new project? ALL unsaved progress will be lost!',
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self.po_entries = []
+        self.current_idx = -1
+        self.left_table.setRowCount(0)
+        self.right_table.setRowCount(0)
+        self.lbl_id.setText("ID: -")
+        self.lbl_source.setText("Source: -")
+        self.log("New Project Created. Environment cleared.")
