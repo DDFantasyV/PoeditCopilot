@@ -26,15 +26,10 @@ class MainWindow(QMainWindow):
 
         self.config_path = os.path.join(base_path, 'PoeditCopilot.ini')
 
-        version_path = os.path.join(base_path, '.version')
-        app_version = "0.0.0"  # 默认版本号
-        if os.path.exists(version_path):
-            try:
-                with open(version_path, 'r', encoding='utf-8') as f:
-                    app_version = f.read().strip()
-            except Exception as e:
-                print(f"Failed to read version file: {e}")
-
+        try:
+            from version import __version__ as app_version
+        except ImportError:
+            app_version = "0.0.0"
         self.setWindowTitle(f"Poedit Copilot v{app_version}")
 
         self.po_entries = []
