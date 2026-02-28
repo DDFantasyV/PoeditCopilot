@@ -46,12 +46,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          # -F: 打包成单文件
-          # -n: 指定输出文件名
-          # --clean: 清理缓存
-          # 如果你的程序是纯命令行工具，去掉 -w (windowed) 参数
-          # 如果是 GUI 程序，保留 -w 参数以隐藏控制台窗口
-          pyinstaller --noconsole --onefile --name="PoeditCopilot" PoeditCopilot.py
+          pyinstaller --noconsole --onefile --name="PoeditCopilot" main.py
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

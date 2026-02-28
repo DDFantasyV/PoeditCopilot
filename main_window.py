@@ -18,7 +18,6 @@ from workers import TranslatorWorker
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Poedit Copilot v0.2.0")
 
         if getattr(sys, 'frozen', False):
             base_path = os.path.dirname(sys.executable)
@@ -26,6 +25,18 @@ class MainWindow(QMainWindow):
             base_path = os.path.dirname(os.path.abspath(__file__))
 
         self.config_path = os.path.join(base_path, 'PoeditCopilot.ini')
+
+        version_path = os.path.join(base_path, '.version')
+        app_version = "0.0.0"  # 默认版本号
+        if os.path.exists(version_path):
+            try:
+                with open(version_path, 'r', encoding='utf-8') as f:
+                    app_version = f.read().strip()
+            except Exception as e:
+                print(f"Failed to read version file: {e}")
+
+        self.setWindowTitle(f"Poedit Copilot v{app_version}")
+
         self.po_entries = []
 
         self.log_window = LogWindow()
