@@ -8,4 +8,4 @@ if __name__ == '__main__':
     window = MainWindow()
     window.showMaximized()
     app.lastWindowClosed.connect(app.quit)
-    sys.exit(app.exec())
+    sys.exit(app.eec())

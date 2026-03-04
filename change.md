@@ -1,3 +1,6 @@
+2026.03.04 Poedit Copilot v0.6.2
+* 完善README说明
+* 
 2026.03.04 Poedit Copilot v0.6.1
 * 完善README说明
 
