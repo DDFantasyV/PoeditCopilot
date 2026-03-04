@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog
+from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, LanguageDialog
 from workers import TranslatorWorker
 from po_manager import POManager
 from search_engine import SearchEngine
@@ -75,6 +75,14 @@ class MainWindow(QMainWindow):
         ai_trans_action = QAction("AI Translate", self)
         ai_trans_action.triggered.connect(self.start_ai_trans)
         trans_menu.addAction(ai_trans_action)
+
+        lang_settings_action = QAction("Target Language", self)
+        lang_settings_action.triggered.connect(self.show_language_settings)
+        trans_menu.addAction(lang_settings_action)
+
+        metadata_action = QAction("Metadata", self)
+        metadata_action.triggered.connect(self.show_metadata_settings)
+        trans_menu.addAction(metadata_action)
 
     def init_ui(self):
         main_widget = QWidget()
@@ -306,10 +314,63 @@ class MainWindow(QMainWindow):
             self.log("Translation cancelled: No valid API Key.")
             return
 
-        self.worker = TranslatorWorker(self.po_manager.entries, api_key)
+        config = configparser.ConfigParser()
+        config.read(self.config_path)
+        source_lang = config.get('Settings', 'OriginLanguage', fallback='Russian')
+        target_lang = config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese')
+
+        self.worker = TranslatorWorker(self.po_manager.entries, api_key, source_lang, target_lang)
         self.worker.log_signal.connect(self.log)
         self.worker.finished.connect(self.on_ai_finished)
         self.worker.start()
+
+    def show_language_settings(self):
+        config = configparser.ConfigParser()
+        config.read(self.config_path)
+        origin = config.get('Settings', 'OriginLanguage', fallback='Russian')
+        target = config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese')
+
+        dlg = LanguageDialog(self, origin, target)
+        if dlg.exec():
+            if 'Settings' not in config:
+                config['Settings'] = {}
+            config['Settings']['OriginLanguage'] = dlg.txt_origin.text().strip()
+            config['Settings']['TargetLanguage'] = dlg.txt_target.text().strip()
+            try:
+                with open(self.config_path, 'w') as f:
+                    config.write(f)
+                self.log("Language settings saved.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save settings:\n{e}")
+
+    def show_metadata_settings(self):
+        config = configparser.ConfigParser()
+        config.read(self.config_path)
+
+        # 默认的 Metadata 文本
+        default_meta = (
+            "Project-Id-Version: Mir Korabley\n"
+            "Last-Translator: DDF_FantasyV\n"
+            "Language-Team: <REPAD Localization Team>\n"
+            "Language: zh_SG\n"
+            "Content-Type: text/plain; charset=UTF-8\n"
+            "Content-Transfer-Encoding: 8bit\n"
+            "Plural-Forms: nplurals=1; plural=0;"
+        )
+
+        current_meta = config.get('Settings', 'Metadata', fallback=default_meta)
+
+        dlg = LargeInputDialog(self, "Edit Metadata", "Enter Metadata (Key: Value per line):", current_meta)
+        if dlg.exec():
+            if 'Settings' not in config:
+                config['Settings'] = {}
+            config['Settings']['Metadata'] = dlg.textValue().strip()
+            try:
+                with open(self.config_path, 'w') as f:
+                    config.write(f)
+                self.log("Metadata settings saved.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save settings:\n{e}")
 
     def get_valid_api_key(self):
         config = configparser.ConfigParser()
@@ -397,6 +458,17 @@ class MainWindow(QMainWindow):
     def do_export(self):
         save_path, _ = QFileDialog.getSaveFileName(self, "Export NEW Translated MO", "global.mo", "MO Files (*.mo)")
         if not save_path: return
+
+        config = configparser.ConfigParser()
+        config.read(self.config_path)
+        meta_str = config.get('Settings', 'Metadata', fallback="")
+        meta_dict = None
+        if meta_str:
+            meta_dict = {}
+            for line in meta_str.split('\n'):
+                if ':' in line:
+                    k, v = line.split(':', 1)
+                    meta_dict[k.strip()] = v.strip()
 
         try:
             count = self.po_manager.export_mo(save_path)

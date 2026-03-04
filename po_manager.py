@@ -66,17 +66,20 @@ class POManager:
                 count += 1
         return count
 
-    def export_mo(self, save_path):
+    def export_mo(self, save_path, metadata_dict=None):
         new_po = polib.POFile(wrapwidth=0)
-        new_po.metadata = {
-            'Project-Id-Version': 'Mir Korabley',
-            'Last-Translator': 'DDF_FantasyV',
-            'Language-Team': '<REPAD Localization Team>',
-            'Language': 'zh_SG',
-            'Content-Type': 'text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding': '8bit',
-            'Plural-Forms': 'nplurals=1; plural=0;'
-        }
+        if metadata_dict:
+            new_po.metadata = metadata_dict
+        else:
+            new_po.metadata = {
+                'Project-Id-Version': 'Mir Korabley',
+                'Last-Translator': 'DDF_FantasyV',
+                'Language-Team': '<REPAD Localization Team>',
+                'Language': 'zh_SG',
+                'Content-Type': 'text/plain; charset=UTF-8',
+                'Content-Transfer-Encoding': '8bit',
+                'Plural-Forms': 'nplurals=1; plural=0;'
+            }
         count = 0
         for item in self.entries:
             if item['status'] == 'Deleted': continue

@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QPlainTextEdit, QDialog, QLabel, QLineEdit,
-                             QCheckBox, QPushButton, QHBoxLayout, QGridLayout)
+                             QCheckBox, QPushButton, QHBoxLayout, QGridLayout,
+                             QMessageBox)
 from PyQt6.QtCore import Qt
 
 
@@ -112,3 +113,37 @@ class FindReplaceDialog(QDialog):
             event.ignore()
         else:
             super().keyPressEvent(event)
+
+class LanguageDialog(QDialog):
+    def __init__(self, parent=None, origin="", target=""):
+        super().__init__(parent)
+        self.setWindowTitle("Language Settings")
+        self.resize(300, 100)
+        layout = QVBoxLayout(self)
+
+        grid = QGridLayout()
+        self.lbl_origin = QLabel("Origin Language:")
+        self.txt_origin = QLineEdit(origin)
+        self.lbl_target = QLabel("Target Language:")
+        self.txt_target = QLineEdit(target)
+
+        grid.addWidget(self.lbl_origin, 0, 0)
+        grid.addWidget(self.txt_origin, 0, 1)
+        grid.addWidget(self.lbl_target, 1, 0)
+        grid.addWidget(self.txt_target, 1, 1)
+        layout.addLayout(grid)
+
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.clicked.connect(self.validate_and_accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+
+    def validate_and_accept(self):
+        if not self.txt_origin.text().strip() or not self.txt_target.text().strip():
+            QMessageBox.warning(self, "Error", "Origin and Target languages cannot be empty!")
+            return
+        self.accept()

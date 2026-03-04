@@ -1,3 +1,9 @@
+2026.03.04 Poedit Copilot v0.6.0
+* 新增切换AI翻译语言、修改文件头功能
+
+2026.03.01 Poedit Copilot v0.5.1
+* 更新仓库issue配置
+
 2026.03.01 Poedit Copilot v0.5.0
 * 重构代码，提高运行效率
 
