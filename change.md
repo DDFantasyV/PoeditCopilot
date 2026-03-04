@@ -1,3 +1,6 @@
+2026.03.04 Poedit Copilot v0.6.1
+* 完善README说明
+
 2026.03.04 Poedit Copilot v0.6.0
 * 新增切换AI翻译语言、修改文件头功能
 
