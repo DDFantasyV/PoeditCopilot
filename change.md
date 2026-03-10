@@ -1,3 +1,6 @@
+2026.03.10 Poedit Copilot v0.6.4
+* 修复搜索、替换界面显示bug
+
 2026.03.10 Poedit Copilot v0.6.3
 * 修复程序启动错误
 

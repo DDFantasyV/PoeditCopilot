@@ -107,6 +107,7 @@ class FindReplaceDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
 
         layout.addLayout(btn_layout)
+        self.setLayout(layout)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
