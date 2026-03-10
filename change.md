@@ -1,6 +1,9 @@
+2026.03.10 Poedit Copilot v0.6.3
+* 修复程序启动错误
+
 2026.03.04 Poedit Copilot v0.6.2
 * 完善README说明
-* 
+
 2026.03.04 Poedit Copilot v0.6.1
 * 完善README说明
 
