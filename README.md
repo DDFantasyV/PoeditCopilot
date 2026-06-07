@@ -40,3 +40,7 @@ After all the work is done, click the last button to export.
 - Google Gemini 
 
 More in the future...
+
+## To be done
+- AI Fine-turning GUI
+- Load Memory before Translation

@@ -1,8 +1,35 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QPlainTextEdit, QDialog, QLabel, QLineEdit,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout,
-                             QMessageBox)
+                             QMessageBox, QComboBox, QDoubleSpinBox, QSpinBox,
+                             QGroupBox, QApplication)
 from PyQt6.QtCore import Qt
+
+
+PROMPT_PRESETS = {
+    "Game Localization": (
+        "You are a professional game localization translator.\n"
+        "Translate the following {source_lang} text into {target_lang}.\n"
+        "Rules:\n"
+        "1. Keep technical variables like %(points)s, %s, and {{0}} unchanged.\n"
+        "2. Maintain the gaming context and tone.\n"
+        "3. Output only the translated text, with no explanations or extra quotes.\n"
+        "4. If the text is an ID or code, keep it unchanged.\n\n"
+        "Text: {text}"
+    ),
+    "Literal Translation": (
+        "Translate the following {source_lang} text into {target_lang}.\n"
+        "Keep placeholders, tags, and line breaks unchanged.\n"
+        "Output only the translated text.\n\n"
+        "Text: {text}"
+    ),
+    "Concise UI Text": (
+        "Translate this {source_lang} UI text into concise {target_lang}.\n"
+        "Keep placeholders and formatting tokens unchanged.\n"
+        "Prefer short labels that fit game interface buttons and menus.\n\n"
+        "Text: {text}"
+    ),
+}
 
 
 class LogWindow(QWidget):
@@ -148,3 +175,183 @@ class LanguageDialog(QDialog):
             QMessageBox.warning(self, "Error", "Origin and Target languages cannot be empty!")
             return
         self.accept()
+
+
+class AITranslateDialog(QDialog):
+    def __init__(self, parent=None, settings=None, validate_callback=None):
+        super().__init__(parent)
+        self.settings = settings or {}
+        self.validate_callback = validate_callback
+        self.field_widgets = {}
+        self.normal_styles = {}
+
+        self.setWindowTitle("AI Translate")
+        self.resize(720, 640)
+        self.init_ui()
+        self.load_settings()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        api_group = QGroupBox("Connection")
+        api_grid = QGridLayout(api_group)
+        self.txt_api_key = QLineEdit()
+        self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_model = QLineEdit()
+        self.txt_source_lang = QLineEdit()
+        self.txt_target_lang = QLineEdit()
+
+        api_grid.addWidget(QLabel("API Key:"), 0, 0)
+        api_grid.addWidget(self.txt_api_key, 0, 1)
+        api_grid.addWidget(QLabel("Model:"), 1, 0)
+        api_grid.addWidget(self.txt_model, 1, 1)
+        api_grid.addWidget(QLabel("Source Language:"), 2, 0)
+        api_grid.addWidget(self.txt_source_lang, 2, 1)
+        api_grid.addWidget(QLabel("Target Language:"), 3, 0)
+        api_grid.addWidget(self.txt_target_lang, 3, 1)
+        layout.addWidget(api_group)
+
+        prompt_group = QGroupBox("Prompt")
+        prompt_layout = QVBoxLayout(prompt_group)
+        preset_layout = QHBoxLayout()
+        self.cmb_preset = QComboBox()
+        self.cmb_preset.addItems(list(PROMPT_PRESETS.keys()) + ["Custom"])
+        self.cmb_preset.currentTextChanged.connect(self.on_preset_changed)
+        preset_layout.addWidget(QLabel("Preset:"))
+        preset_layout.addWidget(self.cmb_preset, 1)
+        prompt_layout.addLayout(preset_layout)
+
+        self.txt_prompt = QPlainTextEdit()
+        self.txt_prompt.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.txt_prompt.setPlaceholderText("Use {source_lang}, {target_lang}, and {text} as placeholders.")
+        prompt_layout.addWidget(self.txt_prompt, 1)
+        layout.addWidget(prompt_group, 1)
+
+        advanced_group = QGroupBox("Optional API Parameters")
+        advanced_grid = QGridLayout(advanced_group)
+        self.chk_use_advanced = QCheckBox("Use optional generation parameters")
+        self.spin_temperature = QDoubleSpinBox()
+        self.spin_temperature.setRange(0.0, 2.0)
+        self.spin_temperature.setSingleStep(0.05)
+        self.spin_temperature.setDecimals(2)
+        self.spin_top_p = QDoubleSpinBox()
+        self.spin_top_p.setRange(0.0, 1.0)
+        self.spin_top_p.setSingleStep(0.05)
+        self.spin_top_p.setDecimals(2)
+        self.spin_top_k = QSpinBox()
+        self.spin_top_k.setRange(1, 200)
+        self.spin_max_output_tokens = QSpinBox()
+        self.spin_max_output_tokens.setRange(1, 65536)
+        self.spin_request_delay = QDoubleSpinBox()
+        self.spin_request_delay.setRange(0.0, 60.0)
+        self.spin_request_delay.setSingleStep(0.25)
+        self.spin_request_delay.setDecimals(2)
+
+        advanced_grid.addWidget(self.chk_use_advanced, 0, 0, 1, 2)
+        advanced_grid.addWidget(QLabel("Temperature:"), 1, 0)
+        advanced_grid.addWidget(self.spin_temperature, 1, 1)
+        advanced_grid.addWidget(QLabel("Top P:"), 2, 0)
+        advanced_grid.addWidget(self.spin_top_p, 2, 1)
+        advanced_grid.addWidget(QLabel("Top K:"), 3, 0)
+        advanced_grid.addWidget(self.spin_top_k, 3, 1)
+        advanced_grid.addWidget(QLabel("Max Output Tokens:"), 4, 0)
+        advanced_grid.addWidget(self.spin_max_output_tokens, 4, 1)
+        advanced_grid.addWidget(QLabel("Request Delay Seconds:"), 5, 0)
+        advanced_grid.addWidget(self.spin_request_delay, 5, 1)
+        layout.addWidget(advanced_group)
+
+        self.lbl_status = QLabel("")
+        self.lbl_status.setWordWrap(True)
+        layout.addWidget(self.lbl_status)
+
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.clicked.connect(self.validate_and_accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+
+        self.field_widgets = {
+            "api_key": self.txt_api_key,
+            "model": self.txt_model,
+            "source_lang": self.txt_source_lang,
+            "target_lang": self.txt_target_lang,
+            "prompt_template": self.txt_prompt,
+            "temperature": self.spin_temperature,
+            "top_p": self.spin_top_p,
+            "top_k": self.spin_top_k,
+            "max_output_tokens": self.spin_max_output_tokens,
+            "request_delay": self.spin_request_delay,
+        }
+        self.normal_styles = {name: widget.styleSheet() for name, widget in self.field_widgets.items()}
+
+    def load_settings(self):
+        self.txt_api_key.setText(self.settings.get("api_key", ""))
+        self.txt_model.setText(self.settings.get("model", "gemini-3.1-flash-lite"))
+        self.txt_source_lang.setText(self.settings.get("source_lang", "Russian"))
+        self.txt_target_lang.setText(self.settings.get("target_lang", "Simplified Chinese"))
+        self.txt_prompt.setPlainText(self.settings.get("prompt_template", PROMPT_PRESETS["Game Localization"]))
+        self.cmb_preset.setCurrentText(self.settings.get("prompt_preset", "Game Localization"))
+        self.chk_use_advanced.setChecked(self.settings.get("use_advanced_params", False))
+        self.spin_temperature.setValue(float(self.settings.get("temperature", 0.7)))
+        self.spin_top_p.setValue(float(self.settings.get("top_p", 0.95)))
+        self.spin_top_k.setValue(int(self.settings.get("top_k", 40)))
+        self.spin_max_output_tokens.setValue(int(self.settings.get("max_output_tokens", 2048)))
+        self.spin_request_delay.setValue(float(self.settings.get("request_delay", 1.0)))
+
+    def on_preset_changed(self, preset_name):
+        if preset_name in PROMPT_PRESETS:
+            self.txt_prompt.setPlainText(PROMPT_PRESETS[preset_name])
+
+    def get_settings(self):
+        return {
+            "api_key": self.txt_api_key.text().strip(),
+            "model": self.txt_model.text().strip(),
+            "source_lang": self.txt_source_lang.text().strip(),
+            "target_lang": self.txt_target_lang.text().strip(),
+            "prompt_preset": self.cmb_preset.currentText(),
+            "prompt_template": self.txt_prompt.toPlainText().strip(),
+            "use_advanced_params": self.chk_use_advanced.isChecked(),
+            "temperature": self.spin_temperature.value(),
+            "top_p": self.spin_top_p.value(),
+            "top_k": self.spin_top_k.value(),
+            "max_output_tokens": self.spin_max_output_tokens.value(),
+            "request_delay": self.spin_request_delay.value(),
+        }
+
+    def mark_invalid_fields(self, field_names):
+        invalid_style = "border: 1px solid #d93025; background-color: #fff0f0;"
+        for name, widget in self.field_widgets.items():
+            widget.setStyleSheet(invalid_style if name in field_names else self.normal_styles[name])
+
+    def validate_and_accept(self):
+        self.mark_invalid_fields([])
+        settings = self.get_settings()
+        missing_fields = [
+            name for name in ("api_key", "model", "source_lang", "target_lang", "prompt_template")
+            if not settings[name]
+        ]
+        if missing_fields:
+            self.mark_invalid_fields(missing_fields)
+            self.lbl_status.setText("Please fill in all required fields.")
+            return
+
+        self.btn_ok.setEnabled(False)
+        self.lbl_status.setText("Validating AI translate settings...")
+        QApplication.processEvents()
+
+        if self.validate_callback:
+            is_valid, message, invalid_fields = self.validate_callback(settings)
+        else:
+            is_valid, message, invalid_fields = True, "", []
+
+        self.btn_ok.setEnabled(True)
+        if is_valid:
+            self.lbl_status.setText(message)
+            self.accept()
+        else:
+            self.mark_invalid_fields(invalid_fields)
+            self.lbl_status.setText(message)

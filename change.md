@@ -1,3 +1,7 @@
+2026.06.08 Poedit Copilot v0.7.0
+* 变更模型为gemini-3.1-flash-lite
+* 修改了AI翻译界面，支持调整更多参数
+
 2026.03.10 Poedit Copilot v0.6.4
 * 修复搜索、替换界面显示bug
 

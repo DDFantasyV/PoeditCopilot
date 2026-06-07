@@ -4,12 +4,12 @@ import re
 import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
-                             QSplitter, QLabel, QHeaderView, QInputDialog, QMessageBox, QLineEdit)
+                             QSplitter, QLabel, QHeaderView, QMessageBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, LanguageDialog
+from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, LanguageDialog, AITranslateDialog
 from workers import TranslatorWorker
 from po_manager import POManager
 from search_engine import SearchEngine
@@ -309,24 +309,101 @@ class MainWindow(QMainWindow):
             super().keyPressEvent(event)
 
     def start_ai_trans(self):
-        api_key = self.get_valid_api_key()
-        if not api_key:
-            self.log("Translation cancelled: No valid API Key.")
+        settings = self.read_ai_settings()
+        dlg = AITranslateDialog(self, settings, api_request.validate_api_settings)
+        if not dlg.exec():
+            self.log("Translation cancelled: AI Translate settings were not confirmed.")
             return
 
-        config = configparser.ConfigParser()
-        config.read(self.config_path)
-        source_lang = config.get('Settings', 'OriginLanguage', fallback='Russian')
-        target_lang = config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese')
+        settings = dlg.get_settings()
+        if not self.save_ai_settings(settings):
+            return
 
-        self.worker = TranslatorWorker(self.po_manager.entries, api_key, source_lang, target_lang)
+        self.log("AI Translate settings verified and saved.")
+        self.worker = TranslatorWorker(self.po_manager.entries, settings)
         self.worker.log_signal.connect(self.log)
         self.worker.finished.connect(self.on_ai_finished)
         self.worker.start()
 
+    def read_ai_settings(self):
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
+
+        def get_float(section, option, fallback):
+            try:
+                return config.getfloat(section, option, fallback=fallback)
+            except ValueError:
+                return fallback
+
+        def get_int(section, option, fallback):
+            try:
+                return config.getint(section, option, fallback=fallback)
+            except ValueError:
+                return fallback
+
+        def get_bool(section, option, fallback):
+            try:
+                return config.getboolean(section, option, fallback=fallback)
+            except ValueError:
+                return fallback
+
+        api_key = config.get('AITranslate', 'ApiKey', fallback='')
+        if not api_key:
+            api_key = config.get('Settings', 'GeminiKey', fallback='')
+
+        return {
+            "api_key": api_key,
+            "model": config.get('AITranslate', 'Model', fallback='gemini-3.1-flash-lite'),
+            "source_lang": config.get('Settings', 'OriginLanguage', fallback='Russian'),
+            "target_lang": config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese'),
+            "prompt_preset": config.get('AITranslate', 'PromptPreset', fallback='Game Localization'),
+            "prompt_template": config.get(
+                'AITranslate',
+                'PromptTemplate',
+                fallback=api_request.DEFAULT_PROMPT_TEMPLATE,
+            ),
+            "use_advanced_params": get_bool('AITranslate', 'UseAdvancedParams', False),
+            "temperature": get_float('AITranslate', 'Temperature', 0.7),
+            "top_p": get_float('AITranslate', 'TopP', 0.95),
+            "top_k": get_int('AITranslate', 'TopK', 40),
+            "max_output_tokens": get_int('AITranslate', 'MaxOutputTokens', 2048),
+            "request_delay": get_float('AITranslate', 'RequestDelay', 1.0),
+        }
+
+    def save_ai_settings(self, settings):
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
+        if 'Settings' not in config:
+            config['Settings'] = {}
+        if 'AITranslate' not in config:
+            config['AITranslate'] = {}
+
+        config['Settings']['GeminiKey'] = settings["api_key"]
+        config['Settings']['OriginLanguage'] = settings["source_lang"]
+        config['Settings']['TargetLanguage'] = settings["target_lang"]
+
+        config['AITranslate']['ApiKey'] = settings["api_key"]
+        config['AITranslate']['Model'] = settings["model"]
+        config['AITranslate']['PromptPreset'] = settings["prompt_preset"]
+        config['AITranslate']['PromptTemplate'] = settings["prompt_template"]
+        config['AITranslate']['UseAdvancedParams'] = str(settings["use_advanced_params"])
+        config['AITranslate']['Temperature'] = str(settings["temperature"])
+        config['AITranslate']['TopP'] = str(settings["top_p"])
+        config['AITranslate']['TopK'] = str(settings["top_k"])
+        config['AITranslate']['MaxOutputTokens'] = str(settings["max_output_tokens"])
+        config['AITranslate']['RequestDelay'] = str(settings["request_delay"])
+
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save AI Translate settings:\n{e}")
+            return False
+
     def show_language_settings(self):
-        config = configparser.ConfigParser()
-        config.read(self.config_path)
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
         origin = config.get('Settings', 'OriginLanguage', fallback='Russian')
         target = config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese')
 
@@ -337,17 +414,17 @@ class MainWindow(QMainWindow):
             config['Settings']['OriginLanguage'] = dlg.txt_origin.text().strip()
             config['Settings']['TargetLanguage'] = dlg.txt_target.text().strip()
             try:
-                with open(self.config_path, 'w') as f:
+                with open(self.config_path, 'w', encoding='utf-8') as f:
                     config.write(f)
                 self.log("Language settings saved.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save settings:\n{e}")
 
     def show_metadata_settings(self):
-        config = configparser.ConfigParser()
-        config.read(self.config_path)
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
 
-        # 默认的 Metadata 文本
+        # Default metadata used when no saved metadata exists.
         default_meta = (
             "Project-Id-Version: Mir Korabley\n"
             "Last-Translator: DDF_FantasyV\n"
@@ -366,52 +443,11 @@ class MainWindow(QMainWindow):
                 config['Settings'] = {}
             config['Settings']['Metadata'] = dlg.textValue().strip()
             try:
-                with open(self.config_path, 'w') as f:
+                with open(self.config_path, 'w', encoding='utf-8') as f:
                     config.write(f)
                 self.log("Metadata settings saved.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save settings:\n{e}")
-
-    def get_valid_api_key(self):
-        config = configparser.ConfigParser()
-        current_key = ""
-        if os.path.exists(self.config_path):
-            try:
-                config.read(self.config_path)
-                if 'Settings' in config and 'GeminiKey' in config['Settings']:
-                    current_key = config['Settings']['GeminiKey'].strip()
-            except Exception as e:
-                self.log(f"Config read error: {e}")
-
-        if current_key:
-            return current_key
-
-        while True:
-            text, ok = QInputDialog.getText(self, "API Key Missing",
-                                            "Please enter your Google Gemini API Key:\n",
-                                            QLineEdit.EchoMode.Normal, "")
-            if not ok:
-                return None
-            input_key = text.strip()
-            if not input_key: continue
-
-            self.log("Verifying API Key...")
-            is_valid, msg = api_request.validate_api_key(input_key)
-            if is_valid:
-                self.save_api_key(input_key)
-                self.log("API Key has verified and saved.")
-                return input_key
-            else:
-                QMessageBox.warning(self, "Verification Failed", f"Invalid API Key.\nServer response: {msg}")
-
-    def save_api_key(self, key):
-        config = configparser.ConfigParser()
-        config['Settings'] = {'GeminiKey': key}
-        try:
-            with open(self.config_path, 'w') as f:
-                config.write(f)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save config file:\n{e}")
 
     def log(self, msg):
         self.log_window.log(msg)
@@ -459,8 +495,8 @@ class MainWindow(QMainWindow):
         save_path, _ = QFileDialog.getSaveFileName(self, "Export NEW Translated MO", "global.mo", "MO Files (*.mo)")
         if not save_path: return
 
-        config = configparser.ConfigParser()
-        config.read(self.config_path)
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
         meta_str = config.get('Settings', 'Metadata', fallback="")
         meta_dict = None
         if meta_str:
@@ -472,7 +508,7 @@ class MainWindow(QMainWindow):
 
         try:
             count = self.po_manager.export_mo(save_path)
-            QMessageBox.information(self, "Completed", f"Export Completed！{count} Total.")
+            QMessageBox.information(self, "Completed", f"Export Completed. {count} Total.")
             self.btn_final.setStyleSheet("background-color: rgb(200, 255, 200);")
         except Exception as e:
             self.log(f"Error: {e}")

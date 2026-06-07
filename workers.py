@@ -7,12 +7,10 @@ class TranslatorWorker(QThread):
     finished = pyqtSignal(int, str, dict)
     log_signal = pyqtSignal(str)
 
-    def __init__(self, data_rows, api_key, source_lang="Russian", target_lang="Simplified Chinese"):
+    def __init__(self, data_rows, ai_settings):
         super().__init__()
         self.data_rows = data_rows
-        self.api_key = api_key
-        self.source_lang = source_lang
-        self.target_lang = target_lang
+        self.ai_settings = ai_settings
 
     def run(self):
         self.log_signal.emit(">>> Translation Started...")
@@ -33,9 +31,9 @@ class TranslatorWorker(QThread):
                 trans_dict = {}
 
                 try:
-                    raw_result = api_request.translate_with_gemini(original_text, self.api_key, self.source_lang, self.target_lang)
+                    raw_result = api_request.translate_with_gemini(original_text, self.ai_settings)
                     ai_result = raw_result if "Error" in raw_result else f"[AI] {raw_result}"
-                    time.sleep(1.0)
+                    time.sleep(self.ai_settings.get("request_delay", 1.0))
                 except Exception as e:
                     ai_result = f"Error: {str(e)}"
                     self.log_signal.emit(f"API Error: {str(e)}")
