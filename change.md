@@ -1,3 +1,7 @@
+2026.06.08 Poedit Copilot v0.7.1
+* 优化了界面布局
+* 修复了加载tmp文件后按钮颜色异常的bug
+
 2026.06.08 Poedit Copilot v0.7.0
 * 变更模型为gemini-3.1-flash-lite
 * 修改了AI翻译界面，支持调整更多参数

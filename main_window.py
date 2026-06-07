@@ -4,7 +4,7 @@ import re
 import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
-                             QSplitter, QLabel, QHeaderView, QMessageBox)
+                             QSplitter, QLabel, QHeaderView, QMessageBox, QProgressBar)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QAction
 
@@ -93,6 +93,20 @@ class MainWindow(QMainWindow):
         self.btn_load_old_ru = QPushButton("2. Load OLD Original MO")
         self.btn_load_old_cn = QPushButton("3. Load OLD Translated MO")
         self.btn_final = QPushButton("4. Export NEW Translated MO")
+        self.workflow_buttons = [
+            self.btn_load_new_ru,
+            self.btn_load_old_ru,
+            self.btn_load_old_cn,
+            self.btn_final,
+        ]
+        button_width = max(button.sizeHint().width() for button in self.workflow_buttons)
+        for button in self.workflow_buttons:
+            button.setFixedWidth(button_width)
+
+        self.translation_progress = QProgressBar()
+        self.translation_progress.setMinimumWidth(220)
+        self.translation_progress.setFormat("Translated: %v/%m (%p%)")
+        self.translation_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.btn_load_new_ru.clicked.connect(self.load_new_ru)
         self.btn_load_old_ru.clicked.connect(self.load_old_ru)
@@ -103,6 +117,8 @@ class MainWindow(QMainWindow):
         top_group.addWidget(self.btn_load_old_ru)
         top_group.addWidget(self.btn_load_old_cn)
         top_group.addWidget(self.btn_final)
+        top_group.addStretch(1)
+        top_group.addWidget(self.translation_progress)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.left_table = QTableWidget()
@@ -148,6 +164,51 @@ class MainWindow(QMainWindow):
 
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
+        self.update_translation_progress()
+        self.update_workflow_button_styles()
+
+    def is_entry_translated(self, entry):
+        if entry.get('status') == 'Deleted':
+            return False
+        if entry.get('is_plural'):
+            return any(str(value) != '' for value in entry.get('translated_plural', {}).values())
+        return str(entry.get('translated_text', '')) != ''
+
+    def update_translation_progress(self):
+        active_entries = [entry for entry in self.po_manager.entries if entry.get('status') != 'Deleted']
+        total_count = len(active_entries)
+        translated_count = sum(1 for entry in active_entries if self.is_entry_translated(entry))
+
+        self.translation_progress.setMaximum(total_count)
+        self.translation_progress.setValue(translated_count)
+        if total_count == 0:
+            self.translation_progress.setFormat("Translated: 0/0 (0%)")
+        else:
+            self.translation_progress.setFormat("Translated: %v/%m (%p%)")
+
+    def update_workflow_button_styles(self):
+        for button in self.workflow_buttons:
+            button.setStyleSheet("")
+
+        active_entries = [entry for entry in self.po_manager.entries if entry.get('status') != 'Deleted']
+        if not active_entries:
+            return
+
+        self.btn_load_new_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
+
+        has_comparison = any(
+            entry.get('status') in ('Normal', 'Modified', 'Deleted') or entry.get('old_ru_text')
+            for entry in self.po_manager.entries
+        )
+        if has_comparison:
+            self.btn_load_old_ru.setStyleSheet("background-color: rgb(200, 255, 200);")
+
+        has_translation = any(self.is_entry_translated(entry) for entry in active_entries)
+        if has_translation:
+            self.btn_load_old_cn.setStyleSheet("background-color: rgb(200, 255, 200);")
+
+        if all(self.is_entry_translated(entry) for entry in active_entries):
+            self.btn_final.setStyleSheet("background-color: rgb(200, 255, 200);")
 
     def show_find_dialog(self):
         if not hasattr(self, 'find_dialog'):
@@ -560,6 +621,8 @@ class MainWindow(QMainWindow):
 
         self.left_table.setUpdatesEnabled(True)
         self.right_table.setUpdatesEnabled(True)
+        self.update_translation_progress()
+        self.update_workflow_button_styles()
 
     def _set_item(self, table, row, col, text, color, user_data):
         item = QTableWidgetItem(str(text))
@@ -656,9 +719,6 @@ class MainWindow(QMainWindow):
         self.lbl_id.setText("ID: -")
         self.lbl_source.setText("Source: -")
 
-        self.btn_load_new_ru.setStyleSheet("")
-        self.btn_load_old_ru.setStyleSheet("")
-        self.btn_load_old_cn.setStyleSheet("")
-        self.btn_final.setStyleSheet("")
-
+        self.update_translation_progress()
+        self.update_workflow_button_styles()
         self.log("New Project Created. Environment cleared.")
