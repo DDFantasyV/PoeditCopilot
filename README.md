@@ -42,5 +42,7 @@ After all the work is done, click the last button to export.
 More in the future...
 
 ## To be done
-- AI Fine-turning GUI
-- Load Memory before Translation
+- Optimize the cache function to improve translation quality
+- Set work dir and auto-detect folder's structure
+- Auto update
+- ...

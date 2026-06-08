@@ -8,7 +8,27 @@ def get_gemini_client(api_key):
     return genai.Client(api_key=api_key)
 
 
-def build_prompt(text, source_lang, target_lang, prompt_template):
+def build_context_block(context_examples):
+    if not context_examples:
+        return ""
+
+    lines = [
+        "Reference translations from the current project:",
+        "Use these examples to keep terminology, tone, and style consistent.",
+        "If the source text is exactly the same as a reference source, reuse the reference translation unless it is clearly wrong.",
+    ]
+    for index, example in enumerate(context_examples, start=1):
+        source = str(example.get("source", "")).strip()
+        translation = str(example.get("translation", "")).strip()
+        if not source or not translation:
+            continue
+        lines.append(f"{index}. Source: {source}")
+        lines.append(f"   Translation: {translation}")
+
+    return "\n".join(lines)
+
+
+def build_prompt(text, source_lang, target_lang, prompt_template, context_examples=None):
     if not prompt_template or not prompt_template.strip():
         prompt_template = DEFAULT_PROMPT_TEMPLATE
 
@@ -28,6 +48,9 @@ def build_prompt(text, source_lang, target_lang, prompt_template):
 
     if "{text}" not in prompt_template:
         prompt = f"{prompt.rstrip()}\n\nText: {text}"
+    context_block = build_context_block(context_examples)
+    if context_block:
+        prompt = f"{context_block}\n\n{prompt}"
     return prompt
 
 
@@ -113,7 +136,7 @@ def validate_api_key(api_key):
     return is_valid, message
 
 
-def translate_with_gemini(text, settings):
+def translate_with_gemini(text, settings, context_examples=None):
     if not text or not text.strip():
         return ""
 
@@ -128,6 +151,7 @@ def translate_with_gemini(text, settings):
             settings.get("source_lang", "Russian"),
             settings.get("target_lang", "Simplified Chinese"),
             settings.get("prompt_template", DEFAULT_PROMPT_TEMPLATE),
+            context_examples,
         )
         generation_config = build_generation_config(settings)
         kwargs = {"model": settings.get("model", "gemini-3.1-flash-lite"), "contents": prompt}

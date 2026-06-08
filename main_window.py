@@ -423,6 +423,8 @@ class MainWindow(QMainWindow):
                 'PromptTemplate',
                 fallback=api_request.DEFAULT_PROMPT_TEMPLATE,
             ),
+            "use_context_cache": get_bool('AITranslate', 'UseContextCache', False),
+            "context_cache_limit": get_int('AITranslate', 'ContextCacheLimit', 20),
             "use_advanced_params": get_bool('AITranslate', 'UseAdvancedParams', False),
             "temperature": get_float('AITranslate', 'Temperature', 0.7),
             "top_p": get_float('AITranslate', 'TopP', 0.95),
@@ -447,6 +449,8 @@ class MainWindow(QMainWindow):
         config['AITranslate']['Model'] = settings["model"]
         config['AITranslate']['PromptPreset'] = settings["prompt_preset"]
         config['AITranslate']['PromptTemplate'] = settings["prompt_template"]
+        config['AITranslate']['UseContextCache'] = str(settings["use_context_cache"])
+        config['AITranslate']['ContextCacheLimit'] = str(settings["context_cache_limit"])
         config['AITranslate']['UseAdvancedParams'] = str(settings["use_advanced_params"])
         config['AITranslate']['Temperature'] = str(settings["temperature"])
         config['AITranslate']['TopP'] = str(settings["top_p"])

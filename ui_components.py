@@ -186,7 +186,7 @@ class AITranslateDialog(QDialog):
         self.normal_styles = {}
 
         self.setWindowTitle("AI Translate")
-        self.resize(720, 640)
+        self.resize(720, 700)
         self.init_ui()
         self.load_settings()
 
@@ -226,6 +226,16 @@ class AITranslateDialog(QDialog):
         self.txt_prompt.setPlaceholderText("Use {source_lang}, {target_lang}, and {text} as placeholders.")
         prompt_layout.addWidget(self.txt_prompt, 1)
         layout.addWidget(prompt_group, 1)
+
+        cache_group = QGroupBox("Context Cache")
+        cache_grid = QGridLayout(cache_group)
+        self.chk_use_context_cache = QCheckBox("Use existing translations as context")
+        self.spin_context_cache_limit = QSpinBox()
+        self.spin_context_cache_limit.setRange(1, 100)
+        cache_grid.addWidget(self.chk_use_context_cache, 0, 0, 1, 2)
+        cache_grid.addWidget(QLabel("Reference Examples:"), 1, 0)
+        cache_grid.addWidget(self.spin_context_cache_limit, 1, 1)
+        layout.addWidget(cache_group)
 
         advanced_group = QGroupBox("Optional API Parameters")
         advanced_grid = QGridLayout(advanced_group)
@@ -280,6 +290,7 @@ class AITranslateDialog(QDialog):
             "source_lang": self.txt_source_lang,
             "target_lang": self.txt_target_lang,
             "prompt_template": self.txt_prompt,
+            "context_cache_limit": self.spin_context_cache_limit,
             "temperature": self.spin_temperature,
             "top_p": self.spin_top_p,
             "top_k": self.spin_top_k,
@@ -295,6 +306,8 @@ class AITranslateDialog(QDialog):
         self.txt_target_lang.setText(self.settings.get("target_lang", "Simplified Chinese"))
         self.txt_prompt.setPlainText(self.settings.get("prompt_template", PROMPT_PRESETS["Game Localization"]))
         self.cmb_preset.setCurrentText(self.settings.get("prompt_preset", "Game Localization"))
+        self.chk_use_context_cache.setChecked(self.settings.get("use_context_cache", False))
+        self.spin_context_cache_limit.setValue(int(self.settings.get("context_cache_limit", 20)))
         self.chk_use_advanced.setChecked(self.settings.get("use_advanced_params", False))
         self.spin_temperature.setValue(float(self.settings.get("temperature", 0.7)))
         self.spin_top_p.setValue(float(self.settings.get("top_p", 0.95)))
@@ -314,6 +327,8 @@ class AITranslateDialog(QDialog):
             "target_lang": self.txt_target_lang.text().strip(),
             "prompt_preset": self.cmb_preset.currentText(),
             "prompt_template": self.txt_prompt.toPlainText().strip(),
+            "use_context_cache": self.chk_use_context_cache.isChecked(),
+            "context_cache_limit": self.spin_context_cache_limit.value(),
             "use_advanced_params": self.chk_use_advanced.isChecked(),
             "temperature": self.spin_temperature.value(),
             "top_p": self.spin_top_p.value(),
