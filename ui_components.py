@@ -2,8 +2,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QPlainTextEdit, QDialog, QLabel, QLineEdit,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout,
                              QMessageBox, QComboBox, QDoubleSpinBox, QSpinBox,
-                             QGroupBox, QApplication)
-from PyQt6.QtCore import Qt
+                             QGroupBox)
+from PyQt6.QtCore import Qt, QThread
 
 
 PROMPT_PRESETS = {
@@ -177,6 +177,24 @@ class LanguageDialog(QDialog):
         self.accept()
 
 
+class SettingsValidationWorker(QThread):
+    def __init__(self, validate_callback, settings):
+        super().__init__()
+        self.validate_callback = validate_callback
+        self.settings = settings
+        self.result = (False, "Validation did not complete.", ["api_key", "model"])
+
+    def run(self):
+        try:
+            if self.validate_callback:
+                is_valid, message, invalid_fields = self.validate_callback(self.settings)
+            else:
+                is_valid, message, invalid_fields = True, "", []
+        except Exception as e:
+            is_valid, message, invalid_fields = False, f"Verify Error: {str(e)}", ["api_key", "model"]
+        self.result = (is_valid, message, invalid_fields)
+
+
 class AITranslateDialog(QDialog):
     def __init__(self, parent=None, settings=None, validate_callback=None):
         super().__init__(parent)
@@ -184,6 +202,7 @@ class AITranslateDialog(QDialog):
         self.validate_callback = validate_callback
         self.field_widgets = {}
         self.normal_styles = {}
+        self.validation_worker = None
 
         self.setWindowTitle("AI Translate")
         self.resize(720, 700)
@@ -256,6 +275,12 @@ class AITranslateDialog(QDialog):
         self.spin_request_delay.setRange(0.0, 60.0)
         self.spin_request_delay.setSingleStep(0.25)
         self.spin_request_delay.setDecimals(2)
+        self.spin_request_timeout = QDoubleSpinBox()
+        self.spin_request_timeout.setRange(1.0, 300.0)
+        self.spin_request_timeout.setSingleStep(5.0)
+        self.spin_request_timeout.setDecimals(1)
+        self.spin_max_concurrent = QSpinBox()
+        self.spin_max_concurrent.setRange(1, 10)
 
         advanced_grid.addWidget(self.chk_use_advanced, 0, 0, 1, 2)
         advanced_grid.addWidget(QLabel("Temperature:"), 1, 0)
@@ -268,6 +293,10 @@ class AITranslateDialog(QDialog):
         advanced_grid.addWidget(self.spin_max_output_tokens, 4, 1)
         advanced_grid.addWidget(QLabel("Request Delay Seconds:"), 5, 0)
         advanced_grid.addWidget(self.spin_request_delay, 5, 1)
+        advanced_grid.addWidget(QLabel("Request Timeout Seconds:"), 6, 0)
+        advanced_grid.addWidget(self.spin_request_timeout, 6, 1)
+        advanced_grid.addWidget(QLabel("Max Concurrent Requests:"), 7, 0)
+        advanced_grid.addWidget(self.spin_max_concurrent, 7, 1)
         layout.addWidget(advanced_group)
 
         self.lbl_status = QLabel("")
@@ -296,6 +325,8 @@ class AITranslateDialog(QDialog):
             "top_k": self.spin_top_k,
             "max_output_tokens": self.spin_max_output_tokens,
             "request_delay": self.spin_request_delay,
+            "request_timeout": self.spin_request_timeout,
+            "max_concurrent_requests": self.spin_max_concurrent,
         }
         self.normal_styles = {name: widget.styleSheet() for name, widget in self.field_widgets.items()}
 
@@ -313,7 +344,9 @@ class AITranslateDialog(QDialog):
         self.spin_top_p.setValue(float(self.settings.get("top_p", 0.95)))
         self.spin_top_k.setValue(int(self.settings.get("top_k", 40)))
         self.spin_max_output_tokens.setValue(int(self.settings.get("max_output_tokens", 2048)))
-        self.spin_request_delay.setValue(float(self.settings.get("request_delay", 1.0)))
+        self.spin_request_delay.setValue(float(self.settings.get("request_delay", 0.0)))
+        self.spin_request_timeout.setValue(float(self.settings.get("request_timeout", 45.0)))
+        self.spin_max_concurrent.setValue(int(self.settings.get("max_concurrent_requests", 3)))
 
     def on_preset_changed(self, preset_name):
         if preset_name in PROMPT_PRESETS:
@@ -335,12 +368,20 @@ class AITranslateDialog(QDialog):
             "top_k": self.spin_top_k.value(),
             "max_output_tokens": self.spin_max_output_tokens.value(),
             "request_delay": self.spin_request_delay.value(),
+            "request_timeout": self.spin_request_timeout.value(),
+            "max_concurrent_requests": self.spin_max_concurrent.value(),
         }
 
     def mark_invalid_fields(self, field_names):
         invalid_style = "border: 1px solid #d93025; background-color: #fff0f0;"
         for name, widget in self.field_widgets.items():
             widget.setStyleSheet(invalid_style if name in field_names else self.normal_styles[name])
+
+    def reject(self):
+        if self.validation_worker and self.validation_worker.isRunning():
+            self.lbl_status.setText("Please wait until validation finishes.")
+            return
+        super().reject()
 
     def validate_and_accept(self):
         self.mark_invalid_fields([])
@@ -355,15 +396,23 @@ class AITranslateDialog(QDialog):
             return
 
         self.btn_ok.setEnabled(False)
+        self.btn_cancel.setEnabled(False)
         self.lbl_status.setText("Validating AI translate settings...")
-        QApplication.processEvents()
 
-        if self.validate_callback:
-            is_valid, message, invalid_fields = self.validate_callback(settings)
-        else:
-            is_valid, message, invalid_fields = True, "", []
+        self.validation_worker = SettingsValidationWorker(self.validate_callback, settings)
+        self.validation_worker.finished.connect(self.on_validation_finished)
+        self.validation_worker.start()
+
+    def on_validation_finished(self):
+        worker = self.validation_worker
+        if not worker:
+            return
+        is_valid, message, invalid_fields = worker.result
+        worker.deleteLater()
+        self.validation_worker = None
 
         self.btn_ok.setEnabled(True)
+        self.btn_cancel.setEnabled(True)
         if is_valid:
             self.lbl_status.setText(message)
             self.accept()

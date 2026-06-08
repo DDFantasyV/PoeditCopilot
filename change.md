@@ -1,3 +1,10 @@
+2026.06.08 Poedit Copilot v0.8.1
+* 优化了API请求速度
+* 修复运行过程中程序假死的bug
+
+2026.06.08 Poedit Copilot v0.8.0
+* 新增了上下文缓存功能
+
 2026.06.08 Poedit Copilot v0.7.1
 * 优化了界面布局
 * 修复了加载tmp文件后按钮颜色异常的bug

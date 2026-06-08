@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from difflib import SequenceMatcher
 from PyQt6.QtCore import QThread, pyqtSignal
 import api_request
@@ -6,6 +7,7 @@ import api_request
 
 class TranslatorWorker(QThread):
     finished = pyqtSignal(int, str, dict)
+    process_finished = pyqtSignal()
     log_signal = pyqtSignal(str)
 
     def __init__(self, data_rows, ai_settings):
@@ -13,6 +15,20 @@ class TranslatorWorker(QThread):
         self.data_rows = data_rows
         self.ai_settings = ai_settings
         self.context_cache = {}
+
+    def get_int_setting(self, key, default, minimum, maximum):
+        try:
+            value = int(self.ai_settings.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    def get_float_setting(self, key, default, minimum, maximum):
+        try:
+            value = float(self.ai_settings.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
 
     def clean_cached_translation(self, text):
         text = str(text or "").strip()
@@ -54,8 +70,16 @@ class TranslatorWorker(QThread):
 
         ranked = []
         source_text = str(source_text or "")
+        source_len = len(source_text)
         for source, translation in self.context_cache.items():
             if source == source_text:
+                continue
+            if source_len:
+                length_ratio = min(source_len, len(source)) / max(source_len, len(source), 1)
+                if length_ratio < 0.35:
+                    continue
+            quick_score = SequenceMatcher(None, source_text, source).quick_ratio()
+            if quick_score < 0.25:
                 continue
             score = SequenceMatcher(None, source_text, source).ratio()
             ranked.append((score, source, translation))
@@ -74,64 +98,110 @@ class TranslatorWorker(QThread):
         if source and cleaned and source not in self.context_cache:
             self.context_cache[source] = cleaned
 
+    def should_translate_row(self, row):
+        current_trans_str = row['translated_text']
+        current_trans_dict = row['translated_plural']
+        has_trans = current_trans_str or current_trans_dict
+        return (row['status'] == 'New' and not has_trans) or (row['status'] == 'Modified')
+
+    def build_ai_result(self, row, raw_result):
+        ai_result = raw_result if "Error" in raw_result else f"[AI] {raw_result}"
+        trans_str = ""
+        trans_dict = {}
+
+        if row['is_plural']:
+            old_text = row['translated_plural'].get(0, "")
+            if row['status'] == 'Modified' and old_text:
+                final_text = f"{old_text}\n{ai_result}" if ai_result not in old_text else old_text
+            else:
+                final_text = ai_result
+            trans_dict = {0: final_text}
+            log_message = f"Translation (Plural) [{row['entry_id']}]: Append/Set -> {final_text}"
+        else:
+            old_text = row['translated_text']
+            if row['status'] == 'Modified' and old_text:
+                final_text = f"{old_text}\n{ai_result}" if ai_result not in old_text else old_text
+            else:
+                final_text = ai_result
+            trans_str = final_text
+            log_message = f"Translation (Singular) [{row['entry_id']}]: Append/Set -> {trans_str}"
+
+        return trans_str, trans_dict, log_message
+
+    def translate_row(self, index, row, original_text, context_examples):
+        try:
+            raw_result = api_request.translate_with_gemini(
+                original_text,
+                self.ai_settings,
+                context_examples,
+            )
+            request_delay = self.get_float_setting("request_delay", 0.0, 0.0, 60.0)
+            if request_delay:
+                time.sleep(request_delay)
+            trans_str, trans_dict, log_message = self.build_ai_result(row, raw_result)
+            return index, original_text, trans_str, trans_dict, log_message
+        except Exception as e:
+            error_result = f"Error: {str(e)}"
+            trans_str, trans_dict, log_message = self.build_ai_result(row, error_result)
+            return index, original_text, trans_str, trans_dict, f"API Error: {str(e)}\n{log_message}"
+
+    def emit_result(self, index, original_text, trans_str, trans_dict, log_message):
+        self.add_context_cache_entry(original_text, trans_str or next(iter(trans_dict.values()), ""))
+        self.log_signal.emit(log_message)
+        self.finished.emit(index, trans_str, trans_dict)
+
     def run(self):
         self.log_signal.emit(">>> Translation Started...")
         self.context_cache = self.build_context_cache()
         if self.ai_settings.get("use_context_cache", False):
             self.log_signal.emit(f">>> Context cache loaded: {len(self.context_cache)} entries.")
 
-        for i, row in enumerate(self.data_rows):
-            if self.isInterruptionRequested():
-                break
+        max_workers = self.get_int_setting("max_concurrent_requests", 3, 1, 10)
+        max_pending = max_workers * 2
+        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ai-translate")
+        pending = {}
 
-            current_trans_str = row['translated_text']
-            current_trans_dict = row['translated_plural']
-            has_trans = current_trans_str or current_trans_dict
+        try:
+            for i, row in enumerate(self.data_rows):
+                if self.isInterruptionRequested():
+                    break
+                if not self.should_translate_row(row):
+                    continue
 
-            should_translate = (row['status'] == 'New' and not has_trans) or (row['status'] == 'Modified')
-
-            if should_translate:
                 original_text = row.get('new_ru_text', '') or row['msgid']
-                trans_str = ""
-                trans_dict = {}
+                cached_translation = self.context_cache.get(str(original_text).strip())
+                if self.ai_settings.get("use_context_cache", False) and cached_translation:
+                    trans_str, trans_dict, log_message = self.build_ai_result(row, cached_translation)
+                    self.log_signal.emit(f"Context cache hit [{row['entry_id']}].")
+                    self.emit_result(i, original_text, trans_str, trans_dict, log_message)
+                    continue
 
-                try:
-                    cached_translation = self.context_cache.get(str(original_text).strip())
-                    if self.ai_settings.get("use_context_cache", False) and cached_translation:
-                        raw_result = cached_translation
-                        self.log_signal.emit(f"Context cache hit [{row['entry_id']}].")
-                    else:
-                        context_examples = self.pick_context_examples(original_text)
-                        raw_result = api_request.translate_with_gemini(
-                            original_text,
-                            self.ai_settings,
-                            context_examples,
-                        )
-                        time.sleep(self.ai_settings.get("request_delay", 1.0))
-                    ai_result = raw_result if "Error" in raw_result else f"[AI] {raw_result}"
-                except Exception as e:
-                    ai_result = f"Error: {str(e)}"
-                    self.log_signal.emit(f"API Error: {str(e)}")
+                while len(pending) >= max_pending and not self.isInterruptionRequested():
+                    self.collect_finished_tasks(pending)
 
-                if row['is_plural']:
-                    old_text = current_trans_dict.get(0, "")
-                    if row['status'] == 'Modified' and old_text:
-                        final_text = f"{old_text}\n{ai_result}" if ai_result not in old_text else old_text
-                    else:
-                        final_text = ai_result
-                    trans_dict = {0: final_text}
-                    self.add_context_cache_entry(original_text, final_text)
-                    self.log_signal.emit(f"Translation (Plural) [{row['entry_id']}]: Append/Set -> {final_text}")
-                else:
-                    old_text = current_trans_str
-                    if row['status'] == 'Modified' and old_text:
-                        final_text = f"{old_text}\n{ai_result}" if ai_result not in old_text else old_text
-                    else:
-                        final_text = ai_result
-                    trans_str = final_text
-                    self.add_context_cache_entry(original_text, final_text)
-                    self.log_signal.emit(f"Translation (Singular) [{row['entry_id']}]: Append/Set -> {trans_str}")
+                if self.isInterruptionRequested():
+                    break
 
-                self.finished.emit(i, trans_str, trans_dict)
+                context_examples = self.pick_context_examples(original_text)
+                future = executor.submit(self.translate_row, i, row.copy(), original_text, context_examples)
+                pending[future] = i
 
+            while pending and not self.isInterruptionRequested():
+                self.collect_finished_tasks(pending)
+        finally:
+            cancel_pending = self.isInterruptionRequested()
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=not cancel_pending, cancel_futures=True)
+
+        self.process_finished.emit()
         self.log_signal.emit(">>> Translation Process Finished.")
+
+    def collect_finished_tasks(self, pending):
+        done, _ = wait(pending.keys(), timeout=0.2, return_when=FIRST_COMPLETED)
+        for future in done:
+            pending.pop(future, None)
+            try:
+                self.emit_result(*future.result())
+            except Exception as e:
+                self.log_signal.emit(f"API Error: {str(e)}")

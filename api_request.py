@@ -1,11 +1,37 @@
 from google import genai
 from google.genai import types
-from functools import lru_cache
+import threading
 
 
-@lru_cache(maxsize=1)
-def get_gemini_client(api_key):
-    return genai.Client(api_key=api_key)
+_thread_clients = threading.local()
+
+
+def normalize_timeout_seconds(value, default=45.0):
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1.0, timeout)
+
+
+def get_gemini_client(api_key, timeout_seconds=None):
+    timeout_seconds = normalize_timeout_seconds(timeout_seconds)
+    timeout_ms = int(timeout_seconds * 1000)
+    cache_key = (api_key, timeout_ms)
+    cache = getattr(_thread_clients, "cache", None)
+    if cache is None:
+        cache = {}
+        _thread_clients.cache = cache
+    if cache_key in cache:
+        return cache[cache_key]
+
+    try:
+        http_options = types.HttpOptions(timeout=timeout_ms)
+        client = genai.Client(api_key=api_key, http_options=http_options)
+    except Exception:
+        client = genai.Client(api_key=api_key)
+    cache[cache_key] = client
+    return client
 
 
 def build_context_block(context_examples):
@@ -108,7 +134,7 @@ def validate_api_settings(settings):
     try:
         prompt = build_prompt("Hello", source_lang, target_lang, prompt_template)
         generation_config = build_generation_config(settings)
-        client = get_gemini_client(api_key)
+        client = get_gemini_client(api_key, settings.get("request_timeout", 45.0))
         kwargs = {"model": model, "contents": prompt}
         if generation_config:
             kwargs["config"] = generation_config
@@ -141,7 +167,7 @@ def translate_with_gemini(text, settings, context_examples=None):
         return ""
 
     try:
-        client = get_gemini_client(settings["api_key"])
+        client = get_gemini_client(settings["api_key"], settings.get("request_timeout", 45.0))
     except Exception as e:
         return f"[Client Init Error] {str(e)}"
 

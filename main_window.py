@@ -5,7 +5,7 @@ import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
                              QSplitter, QLabel, QHeaderView, QMessageBox, QProgressBar)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
@@ -34,6 +34,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Poedit Copilot v{app_version}")
         self.po_manager = POManager()
         self.current_idx = -1
+        self.worker = None
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setInterval(250)
+        self.refresh_timer.setSingleShot(True)
+        self.refresh_timer.timeout.connect(self.refresh_ui)
 
         self.log_window = LogWindow()
         self.log_window.show()
@@ -370,6 +375,10 @@ class MainWindow(QMainWindow):
             super().keyPressEvent(event)
 
     def start_ai_trans(self):
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "AI Translate", "AI translation is already running.")
+            return
+
         settings = self.read_ai_settings()
         dlg = AITranslateDialog(self, settings, api_request.validate_api_settings)
         if not dlg.exec():
@@ -384,6 +393,7 @@ class MainWindow(QMainWindow):
         self.worker = TranslatorWorker(self.po_manager.entries, settings)
         self.worker.log_signal.connect(self.log)
         self.worker.finished.connect(self.on_ai_finished)
+        self.worker.process_finished.connect(self.on_ai_process_finished)
         self.worker.start()
 
     def read_ai_settings(self):
@@ -430,7 +440,9 @@ class MainWindow(QMainWindow):
             "top_p": get_float('AITranslate', 'TopP', 0.95),
             "top_k": get_int('AITranslate', 'TopK', 40),
             "max_output_tokens": get_int('AITranslate', 'MaxOutputTokens', 2048),
-            "request_delay": get_float('AITranslate', 'RequestDelay', 1.0),
+            "request_delay": get_float('AITranslate', 'RequestDelay', 0.0),
+            "request_timeout": get_float('AITranslate', 'RequestTimeout', 45.0),
+            "max_concurrent_requests": get_int('AITranslate', 'MaxConcurrentRequests', 3),
         }
 
     def save_ai_settings(self, settings):
@@ -457,6 +469,8 @@ class MainWindow(QMainWindow):
         config['AITranslate']['TopK'] = str(settings["top_k"])
         config['AITranslate']['MaxOutputTokens'] = str(settings["max_output_tokens"])
         config['AITranslate']['RequestDelay'] = str(settings["request_delay"])
+        config['AITranslate']['RequestTimeout'] = str(settings["request_timeout"])
+        config['AITranslate']['MaxConcurrentRequests'] = str(settings["max_concurrent_requests"])
 
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
@@ -689,6 +703,13 @@ class MainWindow(QMainWindow):
             entry['translated_plural'] = text_dict
         else:
             entry['translated_text'] = text_str
+        self.update_translation_progress()
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start()
+
+    def on_ai_process_finished(self):
+        if self.refresh_timer.isActive():
+            self.refresh_timer.stop()
         self.refresh_ui()
 
     def save_progress(self):
