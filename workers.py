@@ -193,6 +193,7 @@ class TranslatorWorker(QThread):
             for future in pending:
                 future.cancel()
             executor.shutdown(wait=not cancel_pending, cancel_futures=True)
+            api_request.close_openai_clients()
 
         self.process_finished.emit()
         self.log_signal.emit(">>> Translation Process Finished.")

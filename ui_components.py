@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QGroupBox)
 from PyQt6.QtCore import Qt, QThread
 
+import api_request
+
 
 PROMPT_PRESETS = {
     "Game Localization": (
@@ -214,20 +216,30 @@ class AITranslateDialog(QDialog):
 
         api_group = QGroupBox("Connection")
         api_grid = QGridLayout(api_group)
+        self.cmb_api_format = QComboBox()
+        for value, label in api_request.API_FORMAT_CHOICES:
+            self.cmb_api_format.addItem(label, value)
+        self.txt_base_url = QLineEdit()
+        self.txt_base_url.setPlaceholderText("Optional, e.g. https://generativelanguage.googleapis.com")
         self.txt_api_key = QLineEdit()
         self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_model = QLineEdit()
         self.txt_source_lang = QLineEdit()
-        self.txt_target_lang = QLineEdit()
 
-        api_grid.addWidget(QLabel("API Key:"), 0, 0)
-        api_grid.addWidget(self.txt_api_key, 0, 1)
-        api_grid.addWidget(QLabel("Model:"), 1, 0)
-        api_grid.addWidget(self.txt_model, 1, 1)
-        api_grid.addWidget(QLabel("Source Language:"), 2, 0)
-        api_grid.addWidget(self.txt_source_lang, 2, 1)
-        api_grid.addWidget(QLabel("Target Language:"), 3, 0)
-        api_grid.addWidget(self.txt_target_lang, 3, 1)
+        api_grid.addWidget(QLabel("API Format:"), 0, 0)
+        api_grid.addWidget(self.cmb_api_format, 0, 1)
+        api_grid.addWidget(QLabel("Base URL:"), 1, 0)
+        api_grid.addWidget(self.txt_base_url, 1, 1)
+        api_grid.addWidget(QLabel("API Key:"), 2, 0)
+        api_grid.addWidget(self.txt_api_key, 2, 1)
+        api_grid.addWidget(QLabel("Model:"), 3, 0)
+        api_grid.addWidget(self.txt_model, 3, 1)
+        api_grid.addWidget(QLabel("Source Language:"), 4, 0)
+        api_grid.addWidget(self.txt_source_lang, 4, 1)
+        self.lbl_target_hint = QLabel("Target language is configured in Translate >> Target Language.")
+        self.lbl_target_hint.setStyleSheet("color: #666666;")
+        api_grid.addWidget(self.lbl_target_hint, 5, 0, 1, 2)
+        self.cmb_api_format.currentIndexChanged.connect(self.on_api_format_changed)
         layout.addWidget(api_group)
 
         prompt_group = QGroupBox("Prompt")
@@ -314,10 +326,11 @@ class AITranslateDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.field_widgets = {
+            "api_format": self.cmb_api_format,
+            "base_url": self.txt_base_url,
             "api_key": self.txt_api_key,
             "model": self.txt_model,
             "source_lang": self.txt_source_lang,
-            "target_lang": self.txt_target_lang,
             "prompt_template": self.txt_prompt,
             "context_cache_limit": self.spin_context_cache_limit,
             "temperature": self.spin_temperature,
@@ -330,11 +343,27 @@ class AITranslateDialog(QDialog):
         }
         self.normal_styles = {name: widget.styleSheet() for name, widget in self.field_widgets.items()}
 
+    def get_target_lang(self):
+        target_lang = str(self.settings.get("target_lang") or "").strip()
+        return target_lang or "Simplified Chinese"
+
+    def on_api_format_changed(self, *_args):
+        if self.cmb_api_format.currentData() == api_request.API_FORMAT_OPENAI:
+            self.txt_base_url.setPlaceholderText("Required, e.g. https://api.deepseek.com")
+        else:
+            self.txt_base_url.setPlaceholderText("Optional, e.g. https://generativelanguage.googleapis.com")
+
     def load_settings(self):
+        api_format = api_request.resolve_api_format(
+            self.settings.get("api_format"), self.settings.get("base_url")
+        )
+        index = self.cmb_api_format.findData(api_format)
+        self.cmb_api_format.setCurrentIndex(index if index >= 0 else 0)
+        self.txt_base_url.setText(self.settings.get("base_url", ""))
         self.txt_api_key.setText(self.settings.get("api_key", ""))
         self.txt_model.setText(self.settings.get("model", "gemini-3.1-flash-lite"))
         self.txt_source_lang.setText(self.settings.get("source_lang", "Russian"))
-        self.txt_target_lang.setText(self.settings.get("target_lang", "Simplified Chinese"))
+        self.on_api_format_changed()
         self.txt_prompt.setPlainText(self.settings.get("prompt_template", PROMPT_PRESETS["Game Localization"]))
         self.cmb_preset.setCurrentText(self.settings.get("prompt_preset", "Game Localization"))
         self.chk_use_context_cache.setChecked(self.settings.get("use_context_cache", False))
@@ -354,10 +383,12 @@ class AITranslateDialog(QDialog):
 
     def get_settings(self):
         return {
+            "api_format": self.cmb_api_format.currentData() or api_request.API_FORMAT_GEMINI,
+            "base_url": self.txt_base_url.text().strip(),
             "api_key": self.txt_api_key.text().strip(),
             "model": self.txt_model.text().strip(),
             "source_lang": self.txt_source_lang.text().strip(),
-            "target_lang": self.txt_target_lang.text().strip(),
+            "target_lang": self.get_target_lang(),
             "prompt_preset": self.cmb_preset.currentText(),
             "prompt_template": self.txt_prompt.toPlainText().strip(),
             "use_context_cache": self.chk_use_context_cache.isChecked(),
@@ -387,9 +418,14 @@ class AITranslateDialog(QDialog):
         self.mark_invalid_fields([])
         settings = self.get_settings()
         missing_fields = [
-            name for name in ("api_key", "model", "source_lang", "target_lang", "prompt_template")
+            name for name in ("api_key", "model", "source_lang", "prompt_template")
             if not settings[name]
         ]
+        if (
+            settings["api_format"] == api_request.API_FORMAT_OPENAI
+            and not settings["base_url"]
+        ):
+            missing_fields.append("base_url")
         if missing_fields:
             self.mark_invalid_fields(missing_fields)
             self.lbl_status.setText("Please fill in all required fields.")

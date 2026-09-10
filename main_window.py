@@ -179,10 +179,20 @@ class MainWindow(QMainWindow):
             return any(str(value) != '' for value in entry.get('translated_plural', {}).values())
         return str(entry.get('translated_text', '')) != ''
 
+    def is_entry_reviewed(self, entry):
+        status = entry.get('status')
+        if status == 'Deleted':
+            return False
+        if status == 'Saved':
+            return True
+        if status == 'Normal':
+            return self.is_entry_translated(entry)
+        return False
+
     def update_translation_progress(self):
         active_entries = [entry for entry in self.po_manager.entries if entry.get('status') != 'Deleted']
         total_count = len(active_entries)
-        translated_count = sum(1 for entry in active_entries if self.is_entry_translated(entry))
+        translated_count = sum(1 for entry in active_entries if self.is_entry_reviewed(entry))
 
         self.translation_progress.setMaximum(total_count)
         self.translation_progress.setValue(translated_count)
@@ -212,7 +222,7 @@ class MainWindow(QMainWindow):
         if has_translation:
             self.btn_load_old_cn.setStyleSheet("background-color: rgb(200, 255, 200);")
 
-        if all(self.is_entry_translated(entry) for entry in active_entries):
+        if all(self.is_entry_reviewed(entry) for entry in active_entries):
             self.btn_final.setStyleSheet("background-color: rgb(200, 255, 200);")
 
     def show_find_dialog(self):
@@ -423,6 +433,8 @@ class MainWindow(QMainWindow):
             api_key = config.get('Settings', 'GeminiKey', fallback='')
 
         return {
+            "api_format": config.get('AITranslate', 'ApiFormat', fallback=''),
+            "base_url": config.get('AITranslate', 'BaseUrl', fallback=''),
             "api_key": api_key,
             "model": config.get('AITranslate', 'Model', fallback='gemini-3.1-flash-lite'),
             "source_lang": config.get('Settings', 'OriginLanguage', fallback='Russian'),
@@ -458,6 +470,8 @@ class MainWindow(QMainWindow):
         config['Settings']['TargetLanguage'] = settings["target_lang"]
 
         config['AITranslate']['ApiKey'] = settings["api_key"]
+        config['AITranslate']['ApiFormat'] = settings["api_format"]
+        config['AITranslate']['BaseUrl'] = settings["base_url"]
         config['AITranslate']['Model'] = settings["model"]
         config['AITranslate']['PromptPreset'] = settings["prompt_preset"]
         config['AITranslate']['PromptTemplate'] = settings["prompt_template"]

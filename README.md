@@ -30,6 +30,8 @@ If the entry does not need to be modified, click **Pass** button. If you need to
 - Use the **File >> Save** function to temporarily save the project.
 - Modify the metadata of the translated file in **Translate >> Metadata**.
 - If you need to use the AI translation function, add API key in **Translate >> AI Translate**.
+- Choose **API Format** in **Translate >> AI Translate**: `Google Gemini`, or `OpenAI Compatible` for OpenAI-style services such as DeepSeek, OpenRouter, or a local server.
+- Set **Base URL** to use a custom or proxy endpoint. For the OpenAI compatible format the Base URL is required (for example `https://api.deepseek.com`); the app appends `/chat/completions` automatically. Leave it empty to use the official Google Gemini endpoint.
 - Remember to change your AI translation language in **Translate >> Target Language**.
 
 After all the work is done, click the last button to export.
@@ -37,9 +39,8 @@ After all the work is done, click the last button to export.
 ***
 
 ## Supported API
-- Google Gemini 
-
-More in the future...
+- Google Gemini
+- OpenAI compatible services (OpenAI, DeepSeek, OpenRouter, local servers, ...)
 
 ## To be done
 - Optimize the cache function to improve translation quality
