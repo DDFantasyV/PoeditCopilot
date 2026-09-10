@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QAction
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, LanguageDialog, AITranslateDialog
+from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, AITranslateDialog
 from workers import TranslatorWorker
 from po_manager import POManager
 from search_engine import SearchEngine
@@ -80,10 +80,6 @@ class MainWindow(QMainWindow):
         ai_trans_action = QAction("AI Translate", self)
         ai_trans_action.triggered.connect(self.start_ai_trans)
         trans_menu.addAction(ai_trans_action)
-
-        lang_settings_action = QAction("Target Language", self)
-        lang_settings_action.triggered.connect(self.show_language_settings)
-        trans_menu.addAction(lang_settings_action)
 
         metadata_action = QAction("Metadata", self)
         metadata_action.triggered.connect(self.show_metadata_settings)
@@ -433,10 +429,9 @@ class MainWindow(QMainWindow):
             api_key = config.get('Settings', 'GeminiKey', fallback='')
 
         return {
-            "api_format": config.get('AITranslate', 'ApiFormat', fallback=''),
             "base_url": config.get('AITranslate', 'BaseUrl', fallback=''),
             "api_key": api_key,
-            "model": config.get('AITranslate', 'Model', fallback='gemini-3.1-flash-lite'),
+            "model": config.get('AITranslate', 'Model', fallback='deepseek-v4-flash'),
             "source_lang": config.get('Settings', 'OriginLanguage', fallback='Russian'),
             "target_lang": config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese'),
             "prompt_preset": config.get('AITranslate', 'PromptPreset', fallback='Game Localization'),
@@ -450,7 +445,6 @@ class MainWindow(QMainWindow):
             "use_advanced_params": get_bool('AITranslate', 'UseAdvancedParams', False),
             "temperature": get_float('AITranslate', 'Temperature', 0.7),
             "top_p": get_float('AITranslate', 'TopP', 0.95),
-            "top_k": get_int('AITranslate', 'TopK', 40),
             "max_output_tokens": get_int('AITranslate', 'MaxOutputTokens', 2048),
             "request_delay": get_float('AITranslate', 'RequestDelay', 0.0),
             "request_timeout": get_float('AITranslate', 'RequestTimeout', 45.0),
@@ -465,12 +459,10 @@ class MainWindow(QMainWindow):
         if 'AITranslate' not in config:
             config['AITranslate'] = {}
 
-        config['Settings']['GeminiKey'] = settings["api_key"]
         config['Settings']['OriginLanguage'] = settings["source_lang"]
         config['Settings']['TargetLanguage'] = settings["target_lang"]
 
         config['AITranslate']['ApiKey'] = settings["api_key"]
-        config['AITranslate']['ApiFormat'] = settings["api_format"]
         config['AITranslate']['BaseUrl'] = settings["base_url"]
         config['AITranslate']['Model'] = settings["model"]
         config['AITranslate']['PromptPreset'] = settings["prompt_preset"]
@@ -480,7 +472,6 @@ class MainWindow(QMainWindow):
         config['AITranslate']['UseAdvancedParams'] = str(settings["use_advanced_params"])
         config['AITranslate']['Temperature'] = str(settings["temperature"])
         config['AITranslate']['TopP'] = str(settings["top_p"])
-        config['AITranslate']['TopK'] = str(settings["top_k"])
         config['AITranslate']['MaxOutputTokens'] = str(settings["max_output_tokens"])
         config['AITranslate']['RequestDelay'] = str(settings["request_delay"])
         config['AITranslate']['RequestTimeout'] = str(settings["request_timeout"])
@@ -493,25 +484,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save AI Translate settings:\n{e}")
             return False
-
-    def show_language_settings(self):
-        config = configparser.RawConfigParser()
-        config.read(self.config_path, encoding='utf-8')
-        origin = config.get('Settings', 'OriginLanguage', fallback='Russian')
-        target = config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese')
-
-        dlg = LanguageDialog(self, origin, target)
-        if dlg.exec():
-            if 'Settings' not in config:
-                config['Settings'] = {}
-            config['Settings']['OriginLanguage'] = dlg.txt_origin.text().strip()
-            config['Settings']['TargetLanguage'] = dlg.txt_target.text().strip()
-            try:
-                with open(self.config_path, 'w', encoding='utf-8') as f:
-                    config.write(f)
-                self.log("Language settings saved.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save settings:\n{e}")
 
     def show_metadata_settings(self):
         config = configparser.RawConfigParser()

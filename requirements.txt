@@ -4,5 +4,4 @@ protobuf==6.33.5
 PyQt6==6.10.2
 pyqt6_sip==13.10.2
 # API requirements
-google-genai==1.47.0
 httpx==0.28.1

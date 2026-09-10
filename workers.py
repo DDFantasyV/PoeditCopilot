@@ -130,7 +130,7 @@ class TranslatorWorker(QThread):
 
     def translate_row(self, index, row, original_text, context_examples):
         try:
-            raw_result = api_request.translate_with_gemini(
+            raw_result = api_request.translate_text(
                 original_text,
                 self.ai_settings,
                 context_examples,
@@ -193,7 +193,7 @@ class TranslatorWorker(QThread):
             for future in pending:
                 future.cancel()
             executor.shutdown(wait=not cancel_pending, cancel_futures=True)
-            api_request.close_openai_clients()
+            api_request.close_clients()
 
         self.process_finished.emit()
         self.log_signal.emit(">>> Translation Process Finished.")

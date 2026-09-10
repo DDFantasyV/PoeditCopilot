@@ -1,11 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QPlainTextEdit, QDialog, QLabel, QLineEdit,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout,
-                             QMessageBox, QComboBox, QDoubleSpinBox, QSpinBox,
-                             QGroupBox)
+                             QComboBox, QDoubleSpinBox, QSpinBox, QGroupBox)
 from PyQt6.QtCore import Qt, QThread
-
-import api_request
 
 
 PROMPT_PRESETS = {
@@ -144,41 +141,6 @@ class FindReplaceDialog(QDialog):
         else:
             super().keyPressEvent(event)
 
-class LanguageDialog(QDialog):
-    def __init__(self, parent=None, origin="", target=""):
-        super().__init__(parent)
-        self.setWindowTitle("Language Settings")
-        self.resize(300, 100)
-        layout = QVBoxLayout(self)
-
-        grid = QGridLayout()
-        self.lbl_origin = QLabel("Origin Language:")
-        self.txt_origin = QLineEdit(origin)
-        self.lbl_target = QLabel("Target Language:")
-        self.txt_target = QLineEdit(target)
-
-        grid.addWidget(self.lbl_origin, 0, 0)
-        grid.addWidget(self.txt_origin, 0, 1)
-        grid.addWidget(self.lbl_target, 1, 0)
-        grid.addWidget(self.txt_target, 1, 1)
-        layout.addLayout(grid)
-
-        btn_layout = QHBoxLayout()
-        self.btn_ok = QPushButton("OK")
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_ok.clicked.connect(self.validate_and_accept)
-        self.btn_cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(self.btn_ok)
-        btn_layout.addWidget(self.btn_cancel)
-        layout.addLayout(btn_layout)
-
-    def validate_and_accept(self):
-        if not self.txt_origin.text().strip() or not self.txt_target.text().strip():
-            QMessageBox.warning(self, "Error", "Origin and Target languages cannot be empty!")
-            return
-        self.accept()
-
-
 class SettingsValidationWorker(QThread):
     def __init__(self, validate_callback, settings):
         super().__init__()
@@ -216,30 +178,24 @@ class AITranslateDialog(QDialog):
 
         api_group = QGroupBox("Connection")
         api_grid = QGridLayout(api_group)
-        self.cmb_api_format = QComboBox()
-        for value, label in api_request.API_FORMAT_CHOICES:
-            self.cmb_api_format.addItem(label, value)
         self.txt_base_url = QLineEdit()
-        self.txt_base_url.setPlaceholderText("Optional, e.g. https://generativelanguage.googleapis.com")
+        self.txt_base_url.setPlaceholderText("Required, e.g. https://api.deepseek.com")
         self.txt_api_key = QLineEdit()
         self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_model = QLineEdit()
         self.txt_source_lang = QLineEdit()
+        self.txt_target_lang = QLineEdit()
 
-        api_grid.addWidget(QLabel("API Format:"), 0, 0)
-        api_grid.addWidget(self.cmb_api_format, 0, 1)
-        api_grid.addWidget(QLabel("Base URL:"), 1, 0)
-        api_grid.addWidget(self.txt_base_url, 1, 1)
-        api_grid.addWidget(QLabel("API Key:"), 2, 0)
-        api_grid.addWidget(self.txt_api_key, 2, 1)
-        api_grid.addWidget(QLabel("Model:"), 3, 0)
-        api_grid.addWidget(self.txt_model, 3, 1)
-        api_grid.addWidget(QLabel("Source Language:"), 4, 0)
-        api_grid.addWidget(self.txt_source_lang, 4, 1)
-        self.lbl_target_hint = QLabel("Target language is configured in Translate >> Target Language.")
-        self.lbl_target_hint.setStyleSheet("color: #666666;")
-        api_grid.addWidget(self.lbl_target_hint, 5, 0, 1, 2)
-        self.cmb_api_format.currentIndexChanged.connect(self.on_api_format_changed)
+        api_grid.addWidget(QLabel("Base URL:"), 0, 0)
+        api_grid.addWidget(self.txt_base_url, 0, 1)
+        api_grid.addWidget(QLabel("API Key:"), 1, 0)
+        api_grid.addWidget(self.txt_api_key, 1, 1)
+        api_grid.addWidget(QLabel("Model:"), 2, 0)
+        api_grid.addWidget(self.txt_model, 2, 1)
+        api_grid.addWidget(QLabel("Source Language:"), 3, 0)
+        api_grid.addWidget(self.txt_source_lang, 3, 1)
+        api_grid.addWidget(QLabel("Target Language:"), 4, 0)
+        api_grid.addWidget(self.txt_target_lang, 4, 1)
         layout.addWidget(api_group)
 
         prompt_group = QGroupBox("Prompt")
@@ -279,8 +235,6 @@ class AITranslateDialog(QDialog):
         self.spin_top_p.setRange(0.0, 1.0)
         self.spin_top_p.setSingleStep(0.05)
         self.spin_top_p.setDecimals(2)
-        self.spin_top_k = QSpinBox()
-        self.spin_top_k.setRange(1, 200)
         self.spin_max_output_tokens = QSpinBox()
         self.spin_max_output_tokens.setRange(1, 65536)
         self.spin_request_delay = QDoubleSpinBox()
@@ -299,16 +253,14 @@ class AITranslateDialog(QDialog):
         advanced_grid.addWidget(self.spin_temperature, 1, 1)
         advanced_grid.addWidget(QLabel("Top P:"), 2, 0)
         advanced_grid.addWidget(self.spin_top_p, 2, 1)
-        advanced_grid.addWidget(QLabel("Top K:"), 3, 0)
-        advanced_grid.addWidget(self.spin_top_k, 3, 1)
-        advanced_grid.addWidget(QLabel("Max Output Tokens:"), 4, 0)
-        advanced_grid.addWidget(self.spin_max_output_tokens, 4, 1)
-        advanced_grid.addWidget(QLabel("Request Delay Seconds:"), 5, 0)
-        advanced_grid.addWidget(self.spin_request_delay, 5, 1)
-        advanced_grid.addWidget(QLabel("Request Timeout Seconds:"), 6, 0)
-        advanced_grid.addWidget(self.spin_request_timeout, 6, 1)
-        advanced_grid.addWidget(QLabel("Max Concurrent Requests:"), 7, 0)
-        advanced_grid.addWidget(self.spin_max_concurrent, 7, 1)
+        advanced_grid.addWidget(QLabel("Max Output Tokens:"), 3, 0)
+        advanced_grid.addWidget(self.spin_max_output_tokens, 3, 1)
+        advanced_grid.addWidget(QLabel("Request Delay Seconds:"), 4, 0)
+        advanced_grid.addWidget(self.spin_request_delay, 4, 1)
+        advanced_grid.addWidget(QLabel("Request Timeout Seconds:"), 5, 0)
+        advanced_grid.addWidget(self.spin_request_timeout, 5, 1)
+        advanced_grid.addWidget(QLabel("Max Concurrent Requests:"), 6, 0)
+        advanced_grid.addWidget(self.spin_max_concurrent, 6, 1)
         layout.addWidget(advanced_group)
 
         self.lbl_status = QLabel("")
@@ -326,16 +278,15 @@ class AITranslateDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.field_widgets = {
-            "api_format": self.cmb_api_format,
             "base_url": self.txt_base_url,
             "api_key": self.txt_api_key,
             "model": self.txt_model,
             "source_lang": self.txt_source_lang,
+            "target_lang": self.txt_target_lang,
             "prompt_template": self.txt_prompt,
             "context_cache_limit": self.spin_context_cache_limit,
             "temperature": self.spin_temperature,
             "top_p": self.spin_top_p,
-            "top_k": self.spin_top_k,
             "max_output_tokens": self.spin_max_output_tokens,
             "request_delay": self.spin_request_delay,
             "request_timeout": self.spin_request_timeout,
@@ -343,27 +294,12 @@ class AITranslateDialog(QDialog):
         }
         self.normal_styles = {name: widget.styleSheet() for name, widget in self.field_widgets.items()}
 
-    def get_target_lang(self):
-        target_lang = str(self.settings.get("target_lang") or "").strip()
-        return target_lang or "Simplified Chinese"
-
-    def on_api_format_changed(self, *_args):
-        if self.cmb_api_format.currentData() == api_request.API_FORMAT_OPENAI:
-            self.txt_base_url.setPlaceholderText("Required, e.g. https://api.deepseek.com")
-        else:
-            self.txt_base_url.setPlaceholderText("Optional, e.g. https://generativelanguage.googleapis.com")
-
     def load_settings(self):
-        api_format = api_request.resolve_api_format(
-            self.settings.get("api_format"), self.settings.get("base_url")
-        )
-        index = self.cmb_api_format.findData(api_format)
-        self.cmb_api_format.setCurrentIndex(index if index >= 0 else 0)
         self.txt_base_url.setText(self.settings.get("base_url", ""))
         self.txt_api_key.setText(self.settings.get("api_key", ""))
-        self.txt_model.setText(self.settings.get("model", "gemini-3.1-flash-lite"))
+        self.txt_model.setText(self.settings.get("model", "deepseek-v4-flash"))
         self.txt_source_lang.setText(self.settings.get("source_lang", "Russian"))
-        self.on_api_format_changed()
+        self.txt_target_lang.setText(self.settings.get("target_lang", "Simplified Chinese"))
         self.txt_prompt.setPlainText(self.settings.get("prompt_template", PROMPT_PRESETS["Game Localization"]))
         self.cmb_preset.setCurrentText(self.settings.get("prompt_preset", "Game Localization"))
         self.chk_use_context_cache.setChecked(self.settings.get("use_context_cache", False))
@@ -371,7 +307,6 @@ class AITranslateDialog(QDialog):
         self.chk_use_advanced.setChecked(self.settings.get("use_advanced_params", False))
         self.spin_temperature.setValue(float(self.settings.get("temperature", 0.7)))
         self.spin_top_p.setValue(float(self.settings.get("top_p", 0.95)))
-        self.spin_top_k.setValue(int(self.settings.get("top_k", 40)))
         self.spin_max_output_tokens.setValue(int(self.settings.get("max_output_tokens", 2048)))
         self.spin_request_delay.setValue(float(self.settings.get("request_delay", 0.0)))
         self.spin_request_timeout.setValue(float(self.settings.get("request_timeout", 45.0)))
@@ -383,12 +318,11 @@ class AITranslateDialog(QDialog):
 
     def get_settings(self):
         return {
-            "api_format": self.cmb_api_format.currentData() or api_request.API_FORMAT_GEMINI,
             "base_url": self.txt_base_url.text().strip(),
             "api_key": self.txt_api_key.text().strip(),
             "model": self.txt_model.text().strip(),
             "source_lang": self.txt_source_lang.text().strip(),
-            "target_lang": self.get_target_lang(),
+            "target_lang": self.txt_target_lang.text().strip(),
             "prompt_preset": self.cmb_preset.currentText(),
             "prompt_template": self.txt_prompt.toPlainText().strip(),
             "use_context_cache": self.chk_use_context_cache.isChecked(),
@@ -396,7 +330,6 @@ class AITranslateDialog(QDialog):
             "use_advanced_params": self.chk_use_advanced.isChecked(),
             "temperature": self.spin_temperature.value(),
             "top_p": self.spin_top_p.value(),
-            "top_k": self.spin_top_k.value(),
             "max_output_tokens": self.spin_max_output_tokens.value(),
             "request_delay": self.spin_request_delay.value(),
             "request_timeout": self.spin_request_timeout.value(),
@@ -418,14 +351,10 @@ class AITranslateDialog(QDialog):
         self.mark_invalid_fields([])
         settings = self.get_settings()
         missing_fields = [
-            name for name in ("api_key", "model", "source_lang", "prompt_template")
+            name
+            for name in ("base_url", "api_key", "model", "source_lang", "target_lang", "prompt_template")
             if not settings[name]
         ]
-        if (
-            settings["api_format"] == api_request.API_FORMAT_OPENAI
-            and not settings["base_url"]
-        ):
-            missing_fields.append("base_url")
         if missing_fields:
             self.mark_invalid_fields(missing_fields)
             self.lbl_status.setText("Please fill in all required fields.")

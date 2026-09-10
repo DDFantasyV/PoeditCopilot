@@ -1,8 +1,10 @@
+2026.09.10 Poedit Copilot v0.9.1
+* 优化了AI翻译界面，并将Target Language功能整合入AI Translate
+* 移除了先前对于Gemini的单独调整
+
 2026.09.10 Poedit Copilot v0.9.0
-* AI翻译界面Connection新增Base URL，可自定义API地址
-* AI翻译支持OpenAI兼容格式（OpenAI / DeepSeek 等），可在Connection中选择API Format
-* 移除AI翻译界面的Target Language，统一由Translate >> Target Language设置
-* 修复AI翻译的词条未经人工审核即计入进度条的bug
+* 新增了支持OpenAI兼容格式
+* 修复了AI翻译的词条未经人工审核即计入进度条的bug
 
 2026.06.08 Poedit Copilot v0.8.1
 * 优化了API请求速度
