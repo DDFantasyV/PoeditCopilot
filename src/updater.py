@@ -21,7 +21,8 @@ DEFAULT_INTERVAL_HOURS = 24
 DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=120.0)
 DOWNLOAD_CHUNK_SIZE = 256 * 1024
 STAGED_EXE_SUFFIX = ".new"
-UPDATE_SCRIPT_NAME = "PoeditCopilot-update.bat"
+UPDATE_SCRIPT_NAME = "PoeditCopilot-update.ps1"
+LEGACY_SCRIPT_NAME = "PoeditCopilot-update.bat"
 
 CANCEL_MESSAGE = "Download cancelled."
 
@@ -328,8 +329,9 @@ def _safe_remove(path):
         pass
 
 
-def _quote_arg(value):
-    return '"' + str(value).replace('"', '""') + '"'
+def _quote_ps(value):
+    """Wrap a value as a PowerShell single-quoted literal."""
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def stage_update_download(
@@ -440,32 +442,39 @@ class UpdateDownloadWorker(QThread):
 
 
 def write_swap_script(staged_path, old_exe_path="", log_path=""):
-    """Write a batch helper that waits for this process to exit, swaps the EXE, then restarts it."""
+    """Write a PowerShell helper that waits for this process to exit, swaps the EXE, then restarts it.
+
+    A PowerShell script is used instead of a self-deleting batch file: ``cmd.exe``
+    re-reads a running ``.bat`` from disk, so ``del "%~f0"`` inside a batch spawns
+    extra shells and loops forever.  PowerShell reads its script up front, so the
+    helper can safely delete itself without running twice.
+    """
     staged_path = os.path.abspath(staged_path)
     new_exe_path = final_path_from_staged(staged_path)
     script_path = os.path.join(os.path.dirname(new_exe_path), UPDATE_SCRIPT_NAME)
+    # Drop the helper written by older builds, which could loop forever.
+    _safe_remove(os.path.join(os.path.dirname(new_exe_path), LEGACY_SCRIPT_NAME))
     pid = os.getpid()
 
-    lines = ["@echo off", "setlocal"]
+    lines = ["$ErrorActionPreference = 'SilentlyContinue'"]
     if log_path:
         lines.append(
-            f"echo [%date% %time%] applying update to {os.path.basename(new_exe_path)} "
-            f">> {_quote_arg(log_path)}"
+            "$stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); "
+            f'"[$stamp] applying update to {os.path.basename(new_exe_path)}" | '
+            f"Add-Content -LiteralPath {_quote_ps(log_path)} -Encoding UTF8"
         )
     lines.extend(
         [
-            ":waitloop",
-            f'tasklist /FI "PID eq {pid}" 2>nul | find /I "{pid}" >nul',
-            "if not errorlevel 1 (",
-            "    ping -n 2 127.0.0.1 >nul",
-            "    goto waitloop",
-            ")",
-            ":moveloop",
-            f"move /Y {_quote_arg(staged_path)} {_quote_arg(new_exe_path)} >nul 2>nul",
-            "if errorlevel 1 (",
-            "    ping -n 2 127.0.0.1 >nul",
-            "    goto moveloop",
-            ")",
+            "$deadline = (Get-Date).AddMinutes(10)",
+            f"while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and "
+            "((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }",
+            f"$moved = $false",
+            "while (-not $moved -and ((Get-Date) -lt $deadline)) {",
+            f"    Move-Item -LiteralPath {_quote_ps(staged_path)} "
+            f"-Destination {_quote_ps(new_exe_path)} -Force -ErrorAction SilentlyContinue",
+            f"    if (Test-Path -LiteralPath {_quote_ps(new_exe_path)}) {{ $moved = $true }}",
+            "    else { Start-Sleep -Milliseconds 500 }",
+            "}",
         ]
     )
     if old_exe_path:
@@ -473,27 +482,52 @@ def write_swap_script(staged_path, old_exe_path="", log_path=""):
         # Only remove the previous build when it uses the versioned name; a legacy
         # plain "PoeditCopilot.exe" may still be referenced by shortcuts.
         if is_versioned_exe_name(old_abs) and os.path.normcase(old_abs) != os.path.normcase(new_exe_path):
-            lines.append(f"del /q {_quote_arg(old_abs)} >nul 2>nul")
+            lines.append(
+                f"Remove-Item -LiteralPath {_quote_ps(old_abs)} -Force -ErrorAction SilentlyContinue"
+            )
     lines.extend(
         [
-            f'start "" {_quote_arg(new_exe_path)}',
-            'del "%~f0"',
-            "endlocal",
+            "if (Test-Path -LiteralPath " + _quote_ps(new_exe_path) + ") {",
+            f"    Start-Process -FilePath {_quote_ps(new_exe_path)}",
+            "}",
+            f"Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
         ]
     )
 
-    with open(script_path, "w", encoding="utf-8") as handle:
+    with open(script_path, "w", encoding="utf-8-sig", newline="") as handle:
         handle.write("\r\n".join(lines) + "\r\n")
     return script_path
 
 
 def launch_swap_script(script_path):
-    """Launch the swap helper detached so it keeps running after this process exits."""
+    """Launch the swap helper fully hidden so it can run after this process exits."""
+    powershell = (
+        os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"),
+            "System32",
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe",
+        )
+    )
+    if not os.path.isfile(powershell):
+        powershell = "powershell.exe"
+
     creationflags = 0
     if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x00000008
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | 0x00000008
     subprocess.Popen(
-        ["cmd", "/c", str(script_path)],
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(script_path),
+        ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -215,5 +215,6 @@ __marimo__/
 # Update staging artifacts (downloaded builds, swap helper, logs)
 *.exe.new
 *.exe.new.part
+PoeditCopilot-update.ps1
 PoeditCopilot-update.bat
 update.log
