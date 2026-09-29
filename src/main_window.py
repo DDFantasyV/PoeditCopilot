@@ -4,7 +4,8 @@ import re
 import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
-                             QSplitter, QLabel, QHeaderView, QMessageBox, QProgressBar)
+                             QSplitter, QLabel, QHeaderView, QMessageBox, QProgressBar,
+                             QProgressDialog)
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QAction, QDesktopServices
 
@@ -52,6 +53,11 @@ class MainWindow(QMainWindow):
         self.current_idx = -1
         self.worker = None
         self.update_worker = None
+        self.update_download_worker = None
+        self.pending_staged_update = None
+        self.update_progress = None
+        self._download_version = ""
+        self._staged_prompt_shown = False
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(250)
         self.refresh_timer.setSingleShot(True)
@@ -60,11 +66,13 @@ class MainWindow(QMainWindow):
         self.log_window = LogWindow()
         self.log_window.show()
 
+        self.maybe_finish_staged_update()
         self.init_menu()
         self.init_ui()
 
         # Check for updates shortly after startup so it never delays the UI.
         QTimer.singleShot(3000, self.auto_check_update)
+        QTimer.singleShot(1500, self.prompt_ready_staged_update)
 
     def init_menu(self):
         menubar = self.menuBar()
@@ -84,10 +92,6 @@ class MainWindow(QMainWindow):
         save_project_action.setShortcut("Ctrl+S")
         save_project_action.triggered.connect(self.save_progress)
         file_menu.addAction(save_project_action)
-
-        update_action = QAction("Check for Updates", self)
-        update_action.triggered.connect(lambda: self.check_for_updates(manual=True))
-        file_menu.addAction(update_action)
 
         edit_menu = menubar.addMenu("Edit")
         find_action = QAction("Find", self)
@@ -459,9 +463,9 @@ class MainWindow(QMainWindow):
         return {
             "base_url": config.get('AITranslate', 'BaseUrl', fallback=''),
             "api_key": api_key,
-            "model": config.get('AITranslate', 'Model', fallback='deepseek-v4-flash'),
+            "model": config.get('AITranslate', 'Model', fallback=''),
             "source_lang": config.get('Settings', 'OriginLanguage', fallback='Russian'),
-            "target_lang": config.get('Settings', 'TargetLanguage', fallback='Simplified Chinese'),
+            "target_lang": config.get('Settings', 'TargetLanguage', fallback=''),
             "prompt_preset": config.get('AITranslate', 'PromptPreset', fallback='Game Localization'),
             "prompt_template": config.get(
                 'AITranslate',
@@ -651,23 +655,172 @@ class MainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setWindowTitle("Update Available")
         box.setIcon(QMessageBox.Icon.Information)
-        box.setText(f"A newer version of Poedit Copilot is available.\n\nv{info.current_version} -> v{info.latest_version}")
-        details = "Opening the release page lets you download the new build manually."
+        box.setText(
+            "A newer version of Poedit Copilot is available.\n\n"
+            f"v{info.current_version} -> v{info.latest_version}"
+        )
+        details = (
+            "Download it now; the new build replaces this one and restarts "
+            "automatically when you close the app."
+        )
         if info.published_at:
             details += f"\n\nPublished: {info.published_at}"
         box.setInformativeText(details)
-        open_button = box.addButton("Open Release Page", QMessageBox.ButtonRole.AcceptRole)
+        download_button = box.addButton("Download Update", QMessageBox.ButtonRole.AcceptRole)
+        open_button = box.addButton("Open Release Page", QMessageBox.ButtonRole.ActionRole)
         box.addButton("Skip This Version", QMessageBox.ButtonRole.DestructiveRole)
         box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
         box.exec()
 
         clicked = box.clickedButton()
-        if clicked is open_button:
+        if clicked is download_button:
+            self.start_update_download(info)
+        elif clicked is open_button:
             QDesktopServices.openUrl(QUrl(info.release_url))
             self.log(f"Release page opened: {info.release_url}")
         elif clicked is not None and box.buttonRole(clicked) == QMessageBox.ButtonRole.DestructiveRole:
             self.write_update_settings(SkipVersion=info.latest_version)
             self.log(f"Version v{info.latest_version} will not prompt again.")
+
+    def start_update_download(self, info):
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            self.log("Update download skipped: another download is already running.")
+            return
+
+        version = info.version or str(info.latest_version)
+        self._download_version = version
+        staged_path = updater.staged_exe_path(self.base_path, version)
+
+        self.update_progress = QProgressDialog("Downloading update...", "Cancel", 0, 0, self)
+        self.update_progress.setWindowTitle("Download Update")
+        self.update_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.update_progress.setMinimumDuration(0)
+        self.update_progress.setAutoClose(False)
+        self.update_progress.setAutoReset(False)
+        self.update_progress.canceled.connect(self.cancel_update_download)
+        self.update_progress.show()
+
+        self.log(f"Downloading Poedit Copilot v{version}...")
+        self.update_download_worker = updater.UpdateDownloadWorker(
+            info.exe_url, staged_path, checksum_url=info.checksum_url
+        )
+        self.update_download_worker.progress.connect(self.on_update_download_progress)
+        self.update_download_worker.download_finished.connect(self.on_update_download_finished)
+        self.update_download_worker.download_failed.connect(self.on_update_download_failed)
+        self.update_download_worker.start()
+
+    def on_update_download_progress(self, done, total):
+        if getattr(self, "update_progress", None) is None:
+            return
+        if total > 0:
+            self.update_progress.setMaximum(total)
+            self.update_progress.setValue(min(done, total))
+        else:
+            self.update_progress.setMaximum(0)
+
+    def cancel_update_download(self):
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            self.log("Update download cancelled.")
+            self.update_download_worker.cancel()
+
+    def close_update_progress(self):
+        if getattr(self, "update_progress", None) is not None:
+            self.update_progress.reset()
+            self.update_progress.close()
+            self.update_progress = None
+
+    def on_update_download_finished(self, staged_path):
+        self.close_update_progress()
+        version = getattr(self, "_download_version", "")
+        self.pending_staged_update = (version, staged_path)
+        self._staged_prompt_shown = False
+        self.log(f"Update v{version} downloaded and verified: {staged_path}")
+        self.prompt_ready_staged_update()
+
+    def on_update_download_failed(self, message):
+        self.close_update_progress()
+        self.log(f"Update download failed: {message}")
+        QMessageBox.warning(self, "Download Update", f"Could not download the update.\n\n{message}")
+
+    def maybe_finish_staged_update(self):
+        staged = updater.find_staged_update(self.base_path, self.app_version)
+        if staged:
+            self.pending_staged_update = staged
+
+    def prompt_ready_staged_update(self):
+        if not self.pending_staged_update or self._staged_prompt_shown:
+            return
+        self._staged_prompt_shown = True
+        version, staged_path = self.pending_staged_update
+        self.log(f"Prepared update v{version} is ready: {os.path.basename(staged_path)}")
+        answer = QMessageBox.question(
+            self,
+            "Update Ready",
+            f"Poedit Copilot v{version} has been downloaded.\n\n"
+            "Apply it now and restart? If you choose No, it is applied "
+            "automatically the next time you close the app.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.apply_pending_update()
+
+    def launch_update_swap(self, staged_path):
+        script_path = updater.write_swap_script(
+            staged_path,
+            old_exe_path=sys.executable,
+            log_path=os.path.join(self.base_path, "update.log"),
+        )
+        updater.launch_swap_script(script_path)
+        return script_path
+
+    def auto_apply_pending_update(self):
+        """Start the on-exit replacement. Returns True when nothing blocks closing."""
+        if not self.pending_staged_update:
+            return True
+        version, staged_path = self.pending_staged_update
+        if not updater.is_frozen_app():
+            self.log(
+                "Staged update kept: automatic replacement only runs from the packaged EXE."
+            )
+            return True
+        try:
+            script_path = self.launch_update_swap(staged_path)
+        except Exception as error:
+            self.log(f"Could not start the update helper: {error}")
+            return False
+        self.log(f"Update helper started: {script_path}")
+        self.log(f"Poedit Copilot v{version} will be applied and restarted after exit.")
+        self.pending_staged_update = None
+        return True
+
+    def apply_pending_update(self):
+        if not self.pending_staged_update:
+            QMessageBox.information(self, "Apply Update", "No downloaded update is waiting.")
+            return
+        version, staged_path = self.pending_staged_update
+        if not updater.is_frozen_app():
+            self.log("Staged update kept: automatic replacement only runs from the packaged EXE.")
+            QMessageBox.information(
+                self,
+                "Apply Update",
+                "Automatic replacement only runs from the packaged EXE.\n\n"
+                f"A prepared build is waiting at:\n{staged_path}",
+            )
+            return
+        QMessageBox.information(
+            self,
+            "Apply Update",
+            f"Poedit Copilot v{version} is ready to be applied.\n\n"
+            "Close the application to replace it and restart automatically.",
+        )
+
+    def on_about_to_quit(self):
+        """Last hook before the process exits: apply a staged update and restart."""
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            self.update_download_worker.cancel()
+            self.update_download_worker.wait(3000)
+        self.auto_apply_pending_update()
 
     def read_license_text(self):
         path = resource_path(LICENSE_FILE)

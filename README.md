@@ -12,6 +12,7 @@ In addition, **Poedit Copilot** also provides LLM API to assist in translation.
 - Compare changes between new and old files
 - Easier-to-use editor UI interface
 - AI translation based on API
+- Semi-automatic update
 ***
 
 ## Usage
@@ -35,13 +36,10 @@ If the entry does not need to be modified, click **Pass** button. If you need to
 
 After all the work is done, click the last button to export.
 
-***
-
 ## Supported API
 - OpenAI compatible services (OpenAI, DeepSeek, OpenRouter, local servers, ...)
 
 ## To be done
 - Optimize the cache function to improve translation quality
 - Set work dir and auto-detect folder's structure
-- Auto update
 - ...

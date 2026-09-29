@@ -58,15 +58,20 @@ jobs:
 
       - name: Build EXE with PyInstaller
         if: steps.tagcheck.outputs.exists == 'false'
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm --noconsole --onefile --name="PoeditCopilot" --icon="PoeditCopilot.png" --add-data "PoeditCopilot.png;." --add-data "LICENSE;." src/main.py
+          $version = "${{ steps.version.outputs.version }}"
+          pyinstaller --noconfirm --noconsole --onefile --name="PoeditCopilot-$version" --icon="PoeditCopilot.png" --add-data "PoeditCopilot.png;." --add-data "LICENSE;." src/main.py
+          Copy-Item "dist/PoeditCopilot-$version.exe" "dist/PoeditCopilot.exe" -Force
 
-      - name: Generate checksum
+      - name: Generate checksums
         if: steps.tagcheck.outputs.exists == 'false'
         shell: pwsh
         run: |
-          $hash = (Get-FileHash -Algorithm SHA256 -Path dist/PoeditCopilot.exe).Hash.ToLower()
-          "$hash  PoeditCopilot.exe" | Out-File -Encoding ascii dist/PoeditCopilot.exe.sha256
+          $version = "${{ steps.version.outputs.version }}"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path "dist/PoeditCopilot-$version.exe").Hash.ToLower()
+          "$hash  PoeditCopilot-$version.exe" | Out-File -Encoding ascii "dist/PoeditCopilot-$version.exe.sha256"
+          "$hash  PoeditCopilot.exe" | Out-File -Encoding ascii "dist/PoeditCopilot.exe.sha256"
 
       - name: Create Release
         if: steps.tagcheck.outputs.exists == 'false'
@@ -75,6 +80,8 @@ jobs:
           tag_name: ${{ steps.version.outputs.version }}
           name: Version ${{ steps.version.outputs.version }}
           files: |
+            dist/PoeditCopilot-${{ steps.version.outputs.version }}.exe
+            dist/PoeditCopilot-${{ steps.version.outputs.version }}.exe.sha256
             dist/PoeditCopilot.exe
             dist/PoeditCopilot.exe.sha256
           draft: false

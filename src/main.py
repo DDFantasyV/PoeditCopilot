@@ -24,5 +24,6 @@ if __name__ == '__main__':
     app.setWindowIcon(QIcon(resource_path('PoeditCopilot.png')))
     window = MainWindow()
     window.showMaximized()
+    app.aboutToQuit.connect(window.on_about_to_quit)
     app.lastWindowClosed.connect(app.quit)
     sys.exit(app.exec())

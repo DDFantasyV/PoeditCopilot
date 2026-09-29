@@ -211,3 +211,9 @@ __marimo__/
 
 # Temp files
 *.tmp
+
+# Update staging artifacts (downloaded builds, swap helper, logs)
+*.exe.new
+*.exe.new.part
+PoeditCopilot-update.bat
+update.log
