@@ -397,9 +397,9 @@ class AITranslateDialog(QDialog):
     def load_settings(self):
         self.txt_base_url.setText(self.settings.get("base_url", ""))
         self.txt_api_key.setText(self.settings.get("api_key", ""))
-        self.txt_model.setText(self.settings.get("model", "deepseek-v4-flash"))
+        self.txt_model.setText(self.settings.get("model", ""))
         self.txt_source_lang.setText(self.settings.get("source_lang", "Russian"))
-        self.txt_target_lang.setText(self.settings.get("target_lang", "Simplified Chinese"))
+        self.txt_target_lang.setText(self.settings.get("target_lang", ""))
         self.txt_prompt.setPlainText(self.settings.get("prompt_template", PROMPT_PRESETS["Game Localization"]))
         self.cmb_preset.setCurrentText(self.settings.get("prompt_preset", "Game Localization"))
         self.chk_use_context_cache.setChecked(self.settings.get("use_context_cache", False))

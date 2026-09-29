@@ -520,9 +520,9 @@ class MainWindow(QMainWindow):
         # Default metadata used when no saved metadata exists.
         default_meta = (
             "Project-Id-Version: Mir Korabley\n"
-            "Last-Translator: DDF_FantasyV\n"
-            "Language-Team: <REPAD Localization Team>\n"
-            "Language: zh_SG\n"
+            "Last-Translator: \n"
+            "Language-Team: \n"
+            "Language: \n"
             "Content-Type: text/plain; charset=UTF-8\n"
             "Content-Transfer-Encoding: 8bit\n"
             "Plural-Forms: nplurals=1; plural=0;"

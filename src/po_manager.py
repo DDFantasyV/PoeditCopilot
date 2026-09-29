@@ -73,9 +73,9 @@ class POManager:
         else:
             new_po.metadata = {
                 'Project-Id-Version': 'Mir Korabley',
-                'Last-Translator': 'DDF_FantasyV',
-                'Language-Team': '<REPAD Localization Team>',
-                'Language': 'zh_SG',
+                'Last-Translator': '',
+                'Language-Team': '',
+                'Language': '',
                 'Content-Type': 'text/plain; charset=UTF-8',
                 'Content-Transfer-Encoding': '8bit',
                 'Plural-Forms': 'nplurals=1; plural=0;'
