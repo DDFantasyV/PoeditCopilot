@@ -230,40 +230,45 @@ def is_frozen_app():
     return bool(getattr(sys, "frozen", False))
 
 
+def restart_environment():
+    """Environment for relaunching a frozen app as an independent instance.
+    """
+    env = dict(os.environ)
+    for key in list(env):
+        if key.startswith("_PYI_") or key == "_MEIPASS2":
+            env.pop(key, None)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 def versioned_exe_name(version):
     cleaned = str(version or "").strip().lstrip("vV")
     return f"{APP_BASENAME}-{cleaned}.exe" if cleaned else f"{APP_BASENAME}.exe"
 
 
-def is_versioned_exe_name(path):
-    """True for ``PoeditCopilot-<version>.exe`` names produced by the updater."""
-    stem = os.path.splitext(os.path.basename(str(path)))[0]
-    prefix = APP_BASENAME + "-"
-    if not stem.startswith(prefix):
-        return False
-    return parse_version(stem[len(prefix):]) is not None
-
-
-def target_exe_path(install_dir, version):
-    return os.path.join(install_dir, versioned_exe_name(version))
+def installed_exe_path(install_dir):
+    """Path of the installed build. Always the plain ``PoeditCopilot.exe`` name."""
+    return os.path.join(install_dir, f"{APP_BASENAME}.exe")
 
 
 def staged_exe_path(install_dir, version):
-    return target_exe_path(install_dir, version) + STAGED_EXE_SUFFIX
+    """Staging path for a downloaded build; keeps the version only while pending."""
+    return os.path.join(install_dir, versioned_exe_name(version)) + STAGED_EXE_SUFFIX
 
 
 def final_path_from_staged(staged_path):
+    """The installed path a staged build is moved to (the plain ``PoeditCopilot.exe``)."""
     if not str(staged_path).endswith(STAGED_EXE_SUFFIX):
         raise ValueError(f"Staged path must end with {STAGED_EXE_SUFFIX!r}: {staged_path}")
-    return str(staged_path)[: -len(STAGED_EXE_SUFFIX)]
+    return installed_exe_path(os.path.dirname(str(staged_path)))
 
 
 def find_staged_update(install_dir, current_version):
-    """Return ``(version, staged_path)`` for the newest staged build, else None."""
+    """Return ``(version, staged_path)`` for any staged build newer than ``current_version``."""
     if not os.path.isdir(install_dir):
         return None
 
-    newest = None
+    found = None
     suffix = ".exe" + STAGED_EXE_SUFFIX
     for entry in os.listdir(install_dir):
         if not entry.lower().endswith(suffix):
@@ -283,9 +288,9 @@ def find_staged_update(install_dir, current_version):
                 continue
         except OSError:
             continue
-        if newest is None or parse_version(version) > parse_version(newest[0]):
-            newest = (version, path)
-    return newest
+        if found is None or parse_version(version) > parse_version(found[0]):
+            found = (version, path)
+    return found
 
 
 def read_checksum_file(text):
@@ -440,13 +445,8 @@ class UpdateDownloadWorker(QThread):
 
 
 def write_swap_script(staged_path, old_exe_path="", log_path=""):
-    """Write a PowerShell helper that waits for this process to exit, swaps the EXE, then restarts it.
+    """Write a PowerShell helper that waits for this process to exit, swaps the EXE, then restarts it."""
 
-    A PowerShell script is used instead of a self-deleting batch file: ``cmd.exe``
-    re-reads a running ``.bat`` from disk, so ``del "%~f0"`` inside a batch spawns
-    extra shells and loops forever.  PowerShell reads its script up front, so the
-    helper can safely delete itself without running twice.
-    """
     staged_path = os.path.abspath(staged_path)
     new_exe_path = final_path_from_staged(staged_path)
     script_path = os.path.join(os.path.dirname(new_exe_path), UPDATE_SCRIPT_NAME)
@@ -468,27 +468,30 @@ def write_swap_script(staged_path, old_exe_path="", log_path=""):
             "while (-not $moved -and ((Get-Date) -lt $deadline)) {",
             f"    Move-Item -LiteralPath {_quote_ps(staged_path)} "
             f"-Destination {_quote_ps(new_exe_path)} -Force -ErrorAction SilentlyContinue",
-            f"    if (Test-Path -LiteralPath {_quote_ps(new_exe_path)}) {{ $moved = $true }}",
+            f"    if (-not (Test-Path -LiteralPath {_quote_ps(staged_path)})) {{ $moved = $true }}",
             "    else { Start-Sleep -Milliseconds 500 }",
             "}",
         ]
     )
+    lines.append("if ($moved) {")
+    lines.append(f"    Remove-Item -LiteralPath {_quote_ps(staged_path + '.part')} -Force -ErrorAction SilentlyContinue")
     if old_exe_path:
         old_abs = os.path.abspath(old_exe_path)
-        # Only remove the previous build when it uses the versioned name; a legacy
-        # plain "PoeditCopilot.exe" may still be referenced by shortcuts.
-        if is_versioned_exe_name(old_abs) and os.path.normcase(old_abs) != os.path.normcase(new_exe_path):
+        if os.path.normcase(old_abs) != os.path.normcase(new_exe_path):
             lines.append(
-                f"Remove-Item -LiteralPath {_quote_ps(old_abs)} -Force -ErrorAction SilentlyContinue"
+                f"    Remove-Item -LiteralPath {_quote_ps(old_abs)} -Force -ErrorAction SilentlyContinue"
             )
+    if log_path:
+        lines.append(f"    Remove-Item -LiteralPath {_quote_ps(log_path)} -Force -ErrorAction SilentlyContinue")
     lines.extend(
         [
-            "if (Test-Path -LiteralPath " + _quote_ps(new_exe_path) + ") {",
+            "    Get-ChildItem env: | Where-Object { $_.Name -like '_PYI_*' -or $_.Name -eq '_MEIPASS2' } | ForEach-Object { Remove-Item -LiteralPath ('env:' + $_.Name) -ErrorAction SilentlyContinue }",
+            "    $env:PYINSTALLER_RESET_ENVIRONMENT = '1'",
             f"    Start-Process -FilePath {_quote_ps(new_exe_path)}",
             "}",
-            f"Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
         ]
     )
+    lines.append(f"Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue")
 
     with open(script_path, "w", encoding="utf-8-sig", newline="") as handle:
         handle.write("\r\n".join(lines) + "\r\n")
@@ -511,7 +514,7 @@ def launch_swap_script(script_path):
 
     creationflags = 0
     if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | 0x00000008
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.Popen(
         [
             powershell,
@@ -524,6 +527,7 @@ def launch_swap_script(script_path):
             "-File",
             str(script_path),
         ],
+        env=restart_environment(),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
