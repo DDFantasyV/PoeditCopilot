@@ -216,5 +216,4 @@ __marimo__/
 *.exe.new
 *.exe.new.part
 PoeditCopilot-update.ps1
-PoeditCopilot-update.bat
 update.log

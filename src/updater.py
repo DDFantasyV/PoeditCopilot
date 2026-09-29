@@ -22,8 +22,6 @@ DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=120.0)
 DOWNLOAD_CHUNK_SIZE = 256 * 1024
 STAGED_EXE_SUFFIX = ".new"
 UPDATE_SCRIPT_NAME = "PoeditCopilot-update.ps1"
-LEGACY_SCRIPT_NAME = "PoeditCopilot-update.bat"
-
 CANCEL_MESSAGE = "Download cancelled."
 
 
@@ -452,8 +450,6 @@ def write_swap_script(staged_path, old_exe_path="", log_path=""):
     staged_path = os.path.abspath(staged_path)
     new_exe_path = final_path_from_staged(staged_path)
     script_path = os.path.join(os.path.dirname(new_exe_path), UPDATE_SCRIPT_NAME)
-    # Drop the helper written by older builds, which could loop forever.
-    _safe_remove(os.path.join(os.path.dirname(new_exe_path), LEGACY_SCRIPT_NAME))
     pid = os.getpid()
 
     lines = ["$ErrorActionPreference = 'SilentlyContinue'"]
@@ -465,7 +461,7 @@ def write_swap_script(staged_path, old_exe_path="", log_path=""):
         )
     lines.extend(
         [
-            "$deadline = (Get-Date).AddMinutes(10)",
+            f"$deadline = (Get-Date).AddMinutes(1)",
             f"while ((Get-Process -Id {pid} -ErrorAction SilentlyContinue) -and "
             "((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 500 }",
             f"$moved = $false",

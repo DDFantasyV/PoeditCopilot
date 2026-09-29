@@ -812,8 +812,15 @@ class MainWindow(QMainWindow):
             self,
             "Apply Update",
             f"Poedit Copilot v{version} is ready to be applied.\n\n"
-            "Close the application to replace it and restart automatically.",
+            "The application will close, replace, and restart automatically.",
         )
+        QTimer.singleShot(0, self.close_for_update)
+
+    def close_for_update(self):
+        """Exit the app after the user confirmed an update, including the log window."""
+        if self.log_window is not None:
+            self.log_window.close()
+        self.close()
 
     def on_about_to_quit(self):
         """Last hook before the process exits: apply a staged update and restart."""
