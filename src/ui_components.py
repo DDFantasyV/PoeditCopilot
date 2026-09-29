@@ -1,8 +1,108 @@
+import os
+
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QInputDialog,
                              QPlainTextEdit, QDialog, QLabel, QLineEdit,
                              QCheckBox, QPushButton, QHBoxLayout, QGridLayout,
                              QComboBox, QDoubleSpinBox, QSpinBox, QGroupBox)
-from PyQt6.QtCore import Qt, QThread
+from PyQt6.QtCore import Qt, QThread, QUrl
+from PyQt6.QtGui import QPixmap, QDesktopServices
+
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None, app_name="Poedit Copilot", version="0.0.0",
+                 developer="DDF_FantasyV", icon_path=None,
+                 repo_url="", license_name="MIT License", license_text="",
+                 on_check_update=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"About {app_name}")
+        self.repo_url = repo_url
+        self.license_text = license_text
+        self.on_check_update = on_check_update
+        self.setMinimumWidth(380)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(10)
+
+        if icon_path and os.path.exists(icon_path):
+            icon_label = QLabel()
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setPixmap(
+                QPixmap(icon_path).scaled(
+                    96, 96,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            layout.addWidget(icon_label)
+
+        name_label = QLabel(app_name)
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(name_label)
+
+        version_label = QLabel(f"Version {version}")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("font-size: 11pt; color: #555555;")
+        layout.addWidget(version_label)
+
+        developer_label = QLabel(f"Developed by {developer}")
+        developer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(developer_label)
+
+        license_label = QLabel(f"Licensed under the {license_name}")
+        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(license_label)
+
+        button_layout = QHBoxLayout()
+        self.btn_repo = QPushButton("GitHub Repository")
+        self.btn_repo.setEnabled(bool(repo_url))
+        self.btn_repo.clicked.connect(self.open_repo)
+        button_layout.addWidget(self.btn_repo)
+
+        self.btn_license = QPushButton("View License")
+        self.btn_license.setEnabled(bool(license_text))
+        self.btn_license.clicked.connect(self.show_license)
+        button_layout.addWidget(self.btn_license)
+
+        self.btn_update = QPushButton("Check for Updates")
+        self.btn_update.setEnabled(on_check_update is not None)
+        self.btn_update.clicked.connect(self.check_update)
+        button_layout.addWidget(self.btn_update)
+
+        layout.addSpacing(6)
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def open_repo(self):
+        if self.repo_url:
+            QDesktopServices.openUrl(QUrl(self.repo_url))
+
+    def check_update(self):
+        if self.on_check_update is not None:
+            self.on_check_update()
+
+    def show_license(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("License")
+        dialog.resize(560, 480)
+
+        layout = QVBoxLayout()
+        viewer = QPlainTextEdit()
+        viewer.setReadOnly(True)
+        viewer.setPlainText(self.license_text)
+        viewer.setStyleSheet("font-family: Consolas, 'Courier New', monospace;")
+        layout.addWidget(viewer)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dialog.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
 
 PROMPT_PRESETS = {

@@ -5,14 +5,28 @@ import configparser
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
                              QSplitter, QLabel, QHeaderView, QMessageBox, QProgressBar)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QAction
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QColor, QAction, QDesktopServices
 
 import api_request
-from ui_components import LogWindow, LargeInputDialog, FindReplaceDialog, AITranslateDialog
+import updater
+from ui_components import AboutDialog, LogWindow, LargeInputDialog, FindReplaceDialog, AITranslateDialog
 from workers import TranslatorWorker
 from po_manager import POManager
 from search_engine import SearchEngine
+
+
+DEVELOPER_NAME = "DDF_FantasyV"
+REPO_URL = f"https://github.com/{updater.GITHUB_REPO}"
+LICENSE_FILE = "LICENSE"
+
+
+def resource_path(relative_path):
+    if getattr(sys, 'frozen', False):
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 
 class MainWindow(QMainWindow):
@@ -24,6 +38,7 @@ class MainWindow(QMainWindow):
         else:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+        self.base_path = base_path
         self.config_path = os.path.join(base_path, 'PoeditCopilot.ini')
 
         try:
@@ -31,10 +46,12 @@ class MainWindow(QMainWindow):
         except ImportError:
             app_version = "0.0.0"
 
+        self.app_version = app_version
         self.setWindowTitle(f"Poedit Copilot v{app_version}")
         self.po_manager = POManager()
         self.current_idx = -1
         self.worker = None
+        self.update_worker = None
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(250)
         self.refresh_timer.setSingleShot(True)
@@ -45,6 +62,9 @@ class MainWindow(QMainWindow):
 
         self.init_menu()
         self.init_ui()
+
+        # Check for updates shortly after startup so it never delays the UI.
+        QTimer.singleShot(3000, self.auto_check_update)
 
     def init_menu(self):
         menubar = self.menuBar()
@@ -65,6 +85,10 @@ class MainWindow(QMainWindow):
         save_project_action.triggered.connect(self.save_progress)
         file_menu.addAction(save_project_action)
 
+        update_action = QAction("Check for Updates", self)
+        update_action.triggered.connect(lambda: self.check_for_updates(manual=True))
+        file_menu.addAction(update_action)
+
         edit_menu = menubar.addMenu("Edit")
         find_action = QAction("Find", self)
         find_action.setShortcut("Ctrl+F")
@@ -84,6 +108,10 @@ class MainWindow(QMainWindow):
         metadata_action = QAction("Metadata", self)
         metadata_action.triggered.connect(self.show_metadata_settings)
         trans_menu.addAction(metadata_action)
+
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about)
+        menubar.addAction(about_action)
 
     def init_ui(self):
         main_widget = QWidget()
@@ -517,6 +545,152 @@ class MainWindow(QMainWindow):
     def log(self, msg):
         self.log_window.log(msg)
         print(msg)
+
+    def read_update_settings(self):
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
+
+        def get_bool(option, fallback):
+            try:
+                return config.getboolean('Update', option, fallback=fallback)
+            except ValueError:
+                return fallback
+
+        def get_int(option, fallback):
+            try:
+                return config.getint('Update', option, fallback=fallback)
+            except ValueError:
+                return fallback
+
+        return {
+            "auto_check": get_bool('AutoCheck', True),
+            "interval_hours": get_int('CheckIntervalHours', updater.DEFAULT_INTERVAL_HOURS),
+            "last_check": config.get('Update', 'LastCheck', fallback=''),
+            "skip_version": config.get('Update', 'SkipVersion', fallback=''),
+        }
+
+    def write_update_settings(self, **options):
+        config = configparser.RawConfigParser()
+        config.read(self.config_path, encoding='utf-8')
+        if 'Update' not in config:
+            config['Update'] = {}
+        for option, value in options.items():
+            config['Update'][option] = str(value)
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            return True
+        except Exception as e:
+            self.log(f"Update settings could not be saved: {e}")
+            return False
+
+    def auto_check_update(self):
+        settings = self.read_update_settings()
+        if not settings["auto_check"]:
+            self.log("Startup update check skipped: AutoCheck is disabled in PoeditCopilot.ini.")
+            return
+        if not updater.is_check_due(settings["last_check"], settings["interval_hours"]):
+            self.log(
+                "Startup update check skipped: last check was "
+                f"{settings['last_check'] or 'unknown'} and the interval is "
+                f"{settings['interval_hours']}h."
+            )
+            return
+        if self.update_worker and self.update_worker.isRunning():
+            self.log("Startup update check skipped: another update check is already running.")
+            return
+        self.log("Startup update check triggered.")
+        self.check_for_updates(manual=False)
+
+    def check_for_updates(self, manual=False):
+        if self.update_worker and self.update_worker.isRunning():
+            if manual:
+                QMessageBox.information(self, "Check for Updates", "An update check is already running.")
+            return
+
+        self.log("Checking GitHub for newer release...")
+        self.update_worker = updater.UpdateCheckWorker(self.app_version)
+        self.update_worker.check_finished.connect(
+            lambda info: self.on_update_check_finished(info, manual)
+        )
+        self.update_worker.check_failed.connect(
+            lambda message: self.on_update_check_failed(message, manual)
+        )
+        self.update_worker.start()
+
+    def on_update_check_finished(self, info, manual=False):
+        self.write_update_settings(LastCheck=updater.format_check_time())
+
+        if not updater.is_newer_version(info.latest_version, info.current_version):
+            self.log(f"Poedit Copilot is up to date (v{info.current_version}).")
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "Check for Updates",
+                    f"Poedit Copilot v{info.current_version} is the latest version.",
+                )
+            return
+
+        skip_version = self.read_update_settings()["skip_version"]
+        self.log(
+            f"Update available: v{info.current_version} -> v{info.latest_version} "
+            f"({info.release_url})"
+        )
+        if not manual and str(skip_version).strip().lstrip("vV") == info.latest_version.lstrip("vV"):
+            self.log(f"Update v{info.latest_version} is marked as skipped; not prompting.")
+            return
+
+        self.prompt_update(info)
+
+    def on_update_check_failed(self, message, manual=False):
+        self.log(f"Update check failed: {message}")
+        if manual:
+            QMessageBox.warning(self, "Check for Updates", f"Could not check for updates.\n\n{message}")
+
+    def prompt_update(self, info):
+        box = QMessageBox(self)
+        box.setWindowTitle("Update Available")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(f"A newer version of Poedit Copilot is available.\n\nv{info.current_version} -> v{info.latest_version}")
+        details = "Opening the release page lets you download the new build manually."
+        if info.published_at:
+            details += f"\n\nPublished: {info.published_at}"
+        box.setInformativeText(details)
+        open_button = box.addButton("Open Release Page", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Skip This Version", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is open_button:
+            QDesktopServices.openUrl(QUrl(info.release_url))
+            self.log(f"Release page opened: {info.release_url}")
+        elif clicked is not None and box.buttonRole(clicked) == QMessageBox.ButtonRole.DestructiveRole:
+            self.write_update_settings(SkipVersion=info.latest_version)
+            self.log(f"Version v{info.latest_version} will not prompt again.")
+
+    def read_license_text(self):
+        path = resource_path(LICENSE_FILE)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except OSError as e:
+            self.log(f"License file could not be read: {e}")
+            return ""
+
+    def show_about(self):
+        dialog = AboutDialog(
+            self,
+            app_name="Poedit Copilot",
+            version=self.app_version,
+            developer=DEVELOPER_NAME,
+            icon_path=resource_path('PoeditCopilot.png'),
+            repo_url=REPO_URL,
+            license_name="MIT License",
+            license_text=self.read_license_text(),
+            on_check_update=lambda: self.check_for_updates(manual=True),
+        )
+        dialog.exec()
 
     def load_new_ru(self):
         path, _ = QFileDialog.getOpenFileName(self, "1. Choose NEW Original MO", "", "MO Files (*.mo)")

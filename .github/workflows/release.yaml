@@ -3,6 +3,7 @@ name: Build and Release EXE
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -10,11 +11,12 @@ permissions:
 jobs:
   build-and-release:
     runs-on: windows-latest
-    if: contains(github.event.head_commit.message, 'update to')
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,32 +30,53 @@ jobs:
           pip install pyinstaller pillow
           pip install -r requirements.txt
 
-      - name: Extract Version from Commit Message
-        id: get_version
+      - name: Read Version from src/version.py
+        id: version
         shell: pwsh
         run: |
-          $commitMsg = "${{ github.event.head_commit.message }}"
-          
-          if ($commitMsg -match '(?i)update to\s+([\w\d\.-]+)') {
-            $version = $matches[1].Trim()
-            echo "Version: $version"
-            
-            echo "VERSION=$version" >> $env:GITHUB_ENV
-          } else {
-            echo "Version Error"
+          $content = Get-Content -Path src/version.py -Raw
+          if ($content -notmatch "__version__\s*=\s*['""]([\w\.-]+)['""]") {
+            Write-Error "Could not find __version__ in src/version.py"
             exit 1
+          }
+          $version = $matches[1].Trim()
+          Write-Host "Version: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Skip if tag already released
+        id: tagcheck
+        shell: pwsh
+        run: |
+          git fetch --tags --force
+          $tag = "${{ steps.version.outputs.version }}"
+          if (git tag --list $tag) {
+            Write-Host "Tag $tag already exists; nothing to release."
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
           }
 
       - name: Build EXE with PyInstaller
+        if: steps.tagcheck.outputs.exists == 'false'
         run: |
-          pyinstaller --noconfirm --noconsole --onefile --name="PoeditCopilot" --icon="PoeditCopilot.png" --add-data "PoeditCopilot.png;." src/main.py
+          pyinstaller --noconfirm --noconsole --onefile --name="PoeditCopilot" --icon="PoeditCopilot.png" --add-data "PoeditCopilot.png;." --add-data "LICENSE;." src/main.py
+
+      - name: Generate checksum
+        if: steps.tagcheck.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 -Path dist/PoeditCopilot.exe).Hash.ToLower()
+          "$hash  PoeditCopilot.exe" | Out-File -Encoding ascii dist/PoeditCopilot.exe.sha256
 
       - name: Create Release
+        if: steps.tagcheck.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.VERSION }}
-          name: Version ${{ env.VERSION }}
-          files: dist/PoeditCopilot.exe
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Version ${{ steps.version.outputs.version }}
+          files: |
+            dist/PoeditCopilot.exe
+            dist/PoeditCopilot.exe.sha256
           draft: false
           prerelease: false
           generate_release_notes: true
