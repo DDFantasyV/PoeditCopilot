@@ -46,7 +46,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --noconsole --onefile --name="PoeditCopilot" --icon="PoeditCopilot.png" main.py
+          pyinstaller --noconfirm --noconsole --onefile --name="PoeditCopilot" --icon="PoeditCopilot.png" --add-data "PoeditCopilot.png;." src/main.py
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
