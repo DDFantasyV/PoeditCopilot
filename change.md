@@ -1,3 +1,7 @@
+2026.09.29 Poedit Copilot v0.9.2
+* 更新了依赖版本
+* 更新了程序图标
+
 2026.09.10 Poedit Copilot v0.9.1
 * 优化了AI翻译界面，并将Target Language功能整合入AI Translate
 * 移除了先前对于Gemini的单独调整
